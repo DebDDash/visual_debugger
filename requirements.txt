@@ -1,36 +1,54 @@
-# Core ML & math
-torch
-torchvision
-scikit-learn
-pandas
-numpy
-scikit-image
-scipy
-tqdm
-tabulate
+# ---------------------------------------------------------------------------
+# Pinned for reproducibility across macOS (incl. Apple Silicon), Linux, Windows.
+# ALWAYS install into a clean virtual environment, never into conda `base`
+# or a system Python — mixing package managers/environments is the #1 cause
+# of "ImportError: cannot import name X from Y (unknown location)" errors.
+#
+#   conda create -n visual-debugger python=3.11 -y && conda activate visual-debugger
+#   pip install -r requirements.txt
+# ---------------------------------------------------------------------------
+
+# Core ML & math (numpy pinned <2 for the widest compatibility with faiss,
+# open_clip, and other compiled deps as of this writing)
+numpy==1.26.4
+pandas==2.1.4
+scipy==1.11.4
+scikit-learn==1.4.2
+scikit-image==0.22.0
+tqdm==4.66.4
+tabulate==0.9.0
+
+# Deep learning
+torch==2.3.1
+torchvision==0.18.1
 
 # Visualization
-matplotlib
-seaborn
-plotly
-streamlit
+matplotlib==3.8.4
+seaborn==0.13.2
+plotly==5.22.0
+streamlit==1.35.0
 
 # Dimensionality reduction
-umap-learn
+umap-learn==0.5.6
 
 # Image processing
-opencv-python
-Pillow
+opencv-python==4.9.0.80
+Pillow==10.3.0
 
 # Indexing / similarity search
-faiss-cpu
+# faiss-cpu works the same way on macOS (incl. Apple Silicon), Linux, and
+# Windows — it is not a Windows-only or platform-specific choice.
+faiss-cpu==1.8.0
 
 # Embedding models
-open_clip_torch
-timm
+# Single CLIP implementation used everywhere in this project
+# (embedding/extract.py and data_utils/labelling.py). Do not also install
+# the separate OpenAI `clip` package.
+open_clip_torch==2.24.0
+timm==1.0.3
 
 # Data / Arrow support
-pyarrow
+pyarrow==14.0.2
 
 # Utilities
-requests
+requests==2.32.3
