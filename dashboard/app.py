@@ -10,7 +10,7 @@ import pandas as pd
 import streamlit as st
 from PIL import Image
 
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from data_utils.loader import load_dataset, bulk_extract_metadata, summarize_dataset
 from data_utils import visualize as viz
@@ -474,7 +474,7 @@ elif mode == "Run Diagnostics":
                 try:
                     repaired_path = apply_repairs(full_df, label_col="label")
                     with open(repaired_path, "rb") as f:
-                        st.download_button("Download repaired dataset CSV",
+                        st.download_button("⬇ Download repaired dataset CSV",
                                            data=f.read(),
                                            file_name="repaired_dataset.csv", mime="text/csv")
                     st.success("Repaired dataset ready.")
