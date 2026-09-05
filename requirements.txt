@@ -1,0 +1,27 @@
+# Core ML & math
+torch
+torchvision
+scikit-learn
+pandas
+numpy
+scikit-image
+tqdm
+tabulate
+seaborn
+
+# Visualization
+matplotlib
+plotly
+streamlit
+
+# Dimensionality reduction
+umap-learn
+
+# Image processing
+opencv-python
+
+# Indexing / similarity search (Choosing the Windows/CPU option)
+faiss-cpu
+
+# Embedding models
+open_clip_torch
