@@ -5,12 +5,13 @@ scikit-learn
 pandas
 numpy
 scikit-image
+scipy
 tqdm
 tabulate
-seaborn
 
 # Visualization
 matplotlib
+seaborn
 plotly
 streamlit
 
@@ -19,9 +20,17 @@ umap-learn
 
 # Image processing
 opencv-python
+Pillow
 
-# Indexing / similarity search (Choosing the Windows/CPU option)
+# Indexing / similarity search
 faiss-cpu
 
 # Embedding models
 open_clip_torch
+timm
+
+# Data / Arrow support
+pyarrow
+
+# Utilities
+requests
