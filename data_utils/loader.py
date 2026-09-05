@@ -33,6 +33,53 @@ def _make_id(path: Path) -> str:
     return path.stem
 
 
+_JUNK_DIR_NAMES = {"__MACOSX"}
+_IMG_EXTS = {'.jpg', '.jpeg', '.png', '.bmp', '.tiff', '.webp'}
+_UNLABELED_NAMES = {"unlabeled", "unannotated", "unknown", "untagged"}
+
+
+def _is_junk_dir(p: Path) -> bool:
+    """macOS zip metadata folders and any hidden ('.'-prefixed) directory are never real data."""
+    return p.name in _JUNK_DIR_NAMES or p.name.startswith('.')
+
+
+def _is_real_image_file(p: Path) -> bool:
+    """Excludes macOS AppleDouble shadow files (e.g. '._photo.jpg') even though they share the extension."""
+    return p.is_file() and p.suffix.lower() in _IMG_EXTS and not p.name.startswith('.')
+
+
+def _find_leaf_class_dirs(node: Path):
+    """
+    Recursively finds the folders that actually contain images ('leaf' class
+    folders), skipping any macOS/hidden junk directories, and skipping pure
+    wrapper folders (folders that only contain further subfolders, no images
+    of their own) rather than mislabeling everything under the wrapper's name.
+
+    This handles both a flat layout (root/cats/, root/dogs/) and a wrapped
+    layout (root/my_dataset/cats/, root/my_dataset/dogs/) — the latter is
+    what you get from a zip whose contents sit inside one named top folder.
+
+    Returns a list of (label_name, [image_paths]) tuples.
+    """
+    results = []
+    for entry in sorted(node.iterdir()):
+        if not entry.is_dir() or _is_junk_dir(entry):
+            continue
+        sub_dirs = [d for d in entry.iterdir() if d.is_dir() and not _is_junk_dir(d)]
+        own_images = [f for f in entry.iterdir() if _is_real_image_file(f)]
+        if sub_dirs and not own_images:
+            # Pure wrapper folder (e.g. the zip's own name) — descend instead
+            # of using its name as a label.
+            results.extend(_find_leaf_class_dirs(entry))
+        else:
+            results.append((entry.name, own_images))
+            if sub_dirs:
+                # Mixed folder: has its own images AND further subfolders —
+                # treat the subfolders as their own classes too.
+                results.extend(_find_leaf_class_dirs(entry))
+    return results
+
+
 def load_dataset(root: str, structured: bool = True, label_csv: Optional[str] = None) -> List[Dict]:
     root = Path(root)
     records: List[Dict] = []
@@ -51,47 +98,26 @@ def load_dataset(root: str, structured: bool = True, label_csv: Optional[str] = 
         return records
 
     if structured:
-        # Load images from class subfolders as labeled
-        for class_dir in sorted(root.iterdir()):
-            if not class_dir.is_dir():
-                continue
-            label = class_dir.name
-
-            # Check if this subfolder itself contains subfolders (nested)
-            # If so, treat images inside those as labeled too
-            sub_dirs = [x for x in class_dir.iterdir() if x.is_dir()]
-            if sub_dirs:
-                # nested structure — skip, treat as unlabeled folder
-                # check if folder name suggests unlabeled
-                if class_dir.name.lower() in {"unlabeled", "unannotated", "unknown", "untagged"}:
-                    for img_path in class_dir.rglob('*'):
-                        if img_path.is_file() and img_path.suffix.lower() in {'.jpg', '.jpeg', '.png', '.bmp', '.tiff', '.webp'}:
-                            records.append({'id': _make_id(img_path), 'path': str(img_path), 'label': None, 'metadata': {}})
-                else:
-                    for img_path in class_dir.rglob('*'):
-                        if img_path.is_file() and img_path.suffix.lower() in {'.jpg', '.jpeg', '.png', '.bmp', '.tiff', '.webp'}:
-                            records.append({'id': _make_id(img_path), 'path': str(img_path), 'label': label, 'metadata': {}})
-            else:
-                # flat subfolder — images directly inside, use folder name as label
-                # UNLESS folder name suggests unlabeled
-                if class_dir.name.lower() in {"unlabeled", "unannotated", "unknown", "untagged"}:
-                    for img_path in class_dir.iterdir():
-                        if img_path.is_file() and img_path.suffix.lower() in {'.jpg', '.jpeg', '.png', '.bmp', '.tiff', '.webp'}:
-                            records.append({'id': _make_id(img_path), 'path': str(img_path), 'label': None, 'metadata': {}})
-                else:
-                    for img_path in class_dir.iterdir():
-                        if img_path.is_file() and img_path.suffix.lower() in {'.jpg', '.jpeg', '.png', '.bmp', '.tiff', '.webp'}:
-                            records.append({'id': _make_id(img_path), 'path': str(img_path), 'label': label, 'metadata': {}})
+        for label, image_paths in _find_leaf_class_dirs(root):
+            is_unlabeled_folder = label.lower() in _UNLABELED_NAMES
+            for img_path in image_paths:
+                records.append({
+                    'id': _make_id(img_path),
+                    'path': str(img_path),
+                    'label': None if is_unlabeled_folder else label,
+                    'metadata': {},
+                })
 
         # Also pick up any loose images sitting directly at root as unlabeled
+        # (skip macOS AppleDouble shadow files here too).
         for img_path in root.iterdir():
-            if img_path.is_file() and img_path.suffix.lower() in {'.jpg', '.jpeg', '.png', '.bmp', '.tiff', '.webp'}:
+            if _is_real_image_file(img_path):
                 records.append({'id': _make_id(img_path), 'path': str(img_path), 'label': None, 'metadata': {}})
 
     else:
-        # non-structured: all images unlabeled
+        # non-structured: all images unlabeled (still skip junk/hidden files)
         for img_path in sorted(root.rglob('*')):
-            if img_path.is_file() and img_path.suffix.lower() in {'.jpg', '.jpeg', '.png', '.bmp', '.tiff', '.webp'}:
+            if _is_real_image_file(img_path) and not any(_is_junk_dir(parent) for parent in img_path.parents):
                 records.append({'id': _make_id(img_path), 'path': str(img_path), 'label': None, 'metadata': {}})
 
     return records
