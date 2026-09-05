@@ -14,7 +14,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 
 from data_utils.loader import load_dataset, bulk_extract_metadata, summarize_dataset
 from data_utils import visualize as viz
-from embedding import visualize as embviz
+import embedding.visualize as embviz
 from data_utils.labelling import semi_supervised_labeling
 from embedding.extract import EmbeddingExtractor
 from embedding.indexer import build_faiss_index_auto, find_duplicates_faiss_fast
