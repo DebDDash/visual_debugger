@@ -58,12 +58,21 @@ st.markdown("""
 
 with st.sidebar:
     st.markdown("## 🔬 Visual Debugger")
-    st.markdown("*Pre-training dataset auditor*")
+    st.markdown("*Finds problems in your image dataset before you spend time training a model on it*")
     st.markdown("---")
-    mode = st.radio("Mode", ["📂  Upload & Label", "🩺  Run Diagnostics"], label_visibility="collapsed")
+    mode = st.radio(
+        "Mode", ["📂  Upload & Label", "🩺  Run Diagnostics"],
+        label_visibility="collapsed",
+        help="Start with Upload & Label to bring in your data. Once embeddings are saved, switch to Run Diagnostics to check for issues.",
+    )
     st.markdown("---")
-    st.markdown("#### Quick guide")
-    st.markdown("1. **Upload & Label** — upload a dataset ZIP, run semi-supervised labeling, save embeddings\n2. **Run Diagnostics** — detect duplicates, imbalance, outliers, and bias-conflicting samples")
+    st.markdown("#### How this works")
+    st.markdown(
+        "**Step 1 — Upload & Label**\n"
+        "Bring in a dataset ZIP, fill in any missing labels automatically, and save a numeric summary (\"embeddings\") of every image.\n\n"
+        "**Step 2 — Run Diagnostics**\n"
+        "Check for duplicate images, class imbalance, unusual outliers, and bias — then get plain-language fix suggestions."
+    )
     st.markdown("---")
     st.caption("DES646 · IIT Kanpur · 2025")
 
@@ -74,17 +83,57 @@ mode = mode.split("  ")[-1]
 # ══════════════════════════════════════════════════════════════════════════════
 if mode == "Upload & Label":
     st.markdown("# 📂 Upload & Label Dataset")
-    st.markdown("Upload a dataset ZIP (structured folders = class labels), run semi-supervised labeling, and save embeddings for diagnostics.")
+    st.markdown("Please upload your image dataset below so it can be examined and analyzed for duplicates, imbalance, and quality issues.")
 
-    uploaded_zip = st.file_uploader("Dataset ZIP", type=["zip"], label_visibility="collapsed")
+    st.markdown('<div class="section-header">Is your dataset supervised or unlabeled?</div>', unsafe_allow_html=True)
+    dataset_kind = st.radio(
+        "Dataset type",
+        ["✅ Supervised — all images are labeled", "⬜ Unlabeled — some or all labels are missing"],
+        label_visibility="collapsed",
+        help="This just decides what upload instructions to show you — the tool detects the actual folder structure automatically either way.",
+    )
+
+    if dataset_kind.startswith("✅"):
+        st.info(
+            "**Supervised** means every image already belongs to a known class — e.g. you know which photos are cats vs. dogs.\n\n"
+            "**How to upload:** zip your images into one subfolder per class — for example, `dataset.zip` containing `cats/`, `dogs/`, "
+            "`birds/`. Once embeddings are extracted below, you can go straight to Run Diagnostics."
+        )
+    else:
+        st.info(
+            "**Unlabeled** covers both \"none of my images are sorted\" and \"some are sorted, some aren't.\"\n\n"
+            "**How to upload:** zip your sorted images into class subfolders (`cats/`, `dogs/`, ...) if you have any, and leave the rest "
+            "loose in the same zip (or in a folder named `unlabeled/`). If you have at least a handful of labeled examples per class, "
+            "Step 1 below can guess labels for the rest by comparing images to the ones you've already sorted.\n\n"
+            "⚠️ **If you have zero labels at all:** this tool can't invent labels from nothing — Step 1 needs some labeled examples to "
+            "learn from. With zero labels, just skip Step 1; you can still run duplicate detection, outlier detection, and embedding "
+            "visualization in the Diagnostics step, since none of those need labels."
+        )
+
+    uploaded_zip = st.file_uploader("Dataset ZIP", type=["zip"], label_visibility="collapsed",
+                                     help="A .zip file containing your images, structured as described above.")
 
     if uploaded_zip:
-        tmp_dir = tempfile.mkdtemp()
-        zip_path = os.path.join(tmp_dir, uploaded_zip.name)
+        raw_tmp_dir = tempfile.mkdtemp()
+        zip_path = os.path.join(raw_tmp_dir, uploaded_zip.name)
         with open(zip_path, "wb") as f:
             f.write(uploaded_zip.read())
         with zipfile.ZipFile(zip_path, "r") as z:
-            z.extractall(tmp_dir)
+            z.extractall(raw_tmp_dir)
+
+        # Persist the extracted images to a stable location for the rest of
+        # the session. Later steps (Run Diagnostics, robustness/quality
+        # analysis) need to re-read the actual image files, not just the
+        # embeddings — a tempfile.mkdtemp() directory that gets deleted right
+        # after embedding extraction means those steps can never find the
+        # images again, which is what was causing "Original image files not
+        # found on disk."
+        tmp_dir = os.path.join(OUTPUTS_DIR, "dataset_images")
+        if os.path.exists(tmp_dir):
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+        shutil.copytree(raw_tmp_dir, tmp_dir)
+        shutil.rmtree(raw_tmp_dir, ignore_errors=True)
+
         st.success(f"Extracted **{uploaded_zip.name}**")
 
         structured = any(
@@ -113,6 +162,8 @@ if mode == "Upload & Label":
             f'<div class="metric-card"><div class="label">Labeled</div><div class="value">{n_lab}</div><div class="sub">{n_unlab} unlabeled</div></div>'
             f'<div class="metric-card"><div class="label">Classes</div><div class="value">{n_cls}</div></div>'
             '</div>', unsafe_allow_html=True)
+        if n_unlab > 0:
+            st.caption(f"💡 {n_unlab} images have no label yet — Step 1 below can guess labels for them if you have at least a few labeled examples per class.")
 
         st.markdown('<div class="section-header">Image preview</div>', unsafe_allow_html=True)
         img_paths = [r["path"] for r in records if r["path"].lower().endswith((".png",".jpg",".jpeg"))][:12]
@@ -193,11 +244,7 @@ if mode == "Upload & Label":
                     st.success(f"Extracted **{embeddings.shape[0]}** embeddings ({embeddings.shape[1]} dims). Saved to `{OUTPUTS_DIR}/`.")
                 except Exception as e:
                     st.error(f"Embedding extraction failed: {e}")
-
-        try:
-            shutil.rmtree(tmp_dir, ignore_errors=True)
-        except Exception:
-            pass
+        st.caption(f"Uploaded images are kept at `{tmp_dir}` for the rest of this session so later steps (like the robustness/quality analysis) can still read them.")
 
 # ══════════════════════════════════════════════════════════════════════════════
 # MODE 2 — Run Diagnostics
