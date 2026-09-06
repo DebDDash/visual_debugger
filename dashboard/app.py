@@ -33,90 +33,43 @@ os.makedirs(OUTPUTS_DIR, exist_ok=True)
 
 st.set_page_config(
     page_title="Visual Debugger",
-    page_icon="🔬",
     layout="wide",
     initial_sidebar_state="expanded",
 )
 
 st.markdown("""
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,700&family=Work+Sans:wght@400;500;600&display=swap');
-
-:root {
-  --bg: #14120f;
-  --surface: #1e1a15;
-  --line: #3a3226;
-  --ink: #ece5d8;
-  --ink-muted: #9c9280;
-  --flag: #c1440e;
-  --safe: #7a9b6e;
-}
-
-html, body, [data-testid="stAppViewContainer"], .stApp { background: var(--bg) !important; }
-[data-testid="stAppViewContainer"] * { font-family: 'Work Sans', sans-serif; color: var(--ink); }
-h1, h2, h3, .section-header { font-family: 'Fraunces', serif !important; }
-
-[data-testid="stSidebar"] { background: #100e0b; border-right: 1px solid var(--line); }
-[data-testid="stSidebar"] * { color: var(--ink) !important; font-family: 'Work Sans', sans-serif !important; }
-
-.block-container { padding-top: 2rem; max-width: 1080px; }
-h1 { font-weight: 600; font-size: 2.1rem; letter-spacing: -0.01em; }
-
-.metric-row { display: flex; gap: 0; margin-bottom: 1.8rem; border: 1px solid var(--line); }
-.metric-card { flex: 1; background: var(--surface); padding: 1rem 1.3rem; border-right: 1px solid var(--line); }
-.metric-card:last-child { border-right: none; }
-.metric-card .label { font-size: 0.72rem; color: var(--ink-muted); margin-bottom: 0.35rem; }
-.metric-card .value { font-family: 'Fraunces', serif; font-variant-numeric: tabular-nums; font-size: 2rem; font-weight: 600; }
-.metric-card .sub { font-size: 0.72rem; color: var(--ink-muted); margin-top: 0.15rem; }
-
-.section-header { font-size: 1.25rem; font-weight: 600; border-bottom: 1px solid var(--line); padding-bottom: 0.5rem; margin: 2rem 0 1.1rem; }
-
-.step-badge {
-  display: inline-flex; align-items: center; justify-content: center;
-  width: 1.6rem; height: 1.6rem; border-radius: 50%;
-  border: 1px solid var(--flag); color: var(--flag) !important;
-  font-family: 'Fraunces', serif; font-size: 0.85rem; font-weight: 600;
-  margin-right: 0.6rem; vertical-align: middle;
-}
-
-.pill-ok   { background: transparent; color: var(--safe) !important; border: 1px solid var(--safe); border-radius: 3px; padding: 0.1rem 0.6rem; font-size: 0.78rem; }
-.pill-warn { background: transparent; color: var(--flag) !important; border: 1px solid var(--flag); border-radius: 3px; padding: 0.1rem 0.6rem; font-size: 0.78rem; }
-.thin-rule { border: none; border-top: 1px solid var(--line); margin: 1.6rem 0; }
-
-.stButton > button {
-    background: transparent; border: 1px solid var(--flag); color: var(--flag) !important;
-    border-radius: 2px; font-weight: 500;
-}
-.stButton > button:hover { background: var(--flag); color: var(--bg) !important; }
-.stButton > button p { color: inherit !important; }
-
-[data-baseweb="tab-list"] { border-bottom: 1px solid var(--line); gap: 0; background: transparent; }
-[data-baseweb="tab"] { color: var(--ink-muted) !important; }
-[data-baseweb="tab"][aria-selected="true"] { color: var(--ink) !important; border-bottom: 2px solid var(--flag) !important; }
-[data-baseweb="tab-highlight"] { background-color: var(--flag) !important; }
-
-[data-testid="stExpander"] { border: 1px solid var(--line); border-radius: 2px; background: var(--surface); }
-[data-testid="stFileUploader"] { border: 1px dashed var(--line); border-radius: 2px; padding: 0.5rem; }
-
-.stAlert { border-radius: 2px !important; }
+[data-testid="stSidebar"] { background: #0f1117; }
+[data-testid="stSidebar"] * { color: #e0e0e0 !important; }
+.block-container { padding-top: 2rem; max-width: 1100px; }
+.metric-row { display: flex; gap: 1rem; margin-bottom: 1.5rem; }
+.metric-card { flex: 1; background: #1a1d27; border: 1px solid #2a2d3a; border-radius: 10px; padding: 1.1rem 1.4rem; }
+.metric-card .label { font-size: 0.75rem; color: #888; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 0.3rem; }
+.metric-card .value { font-size: 1.8rem; font-weight: 700; color: #e0e0e0; }
+.metric-card .sub { font-size: 0.75rem; color: #666; margin-top: 0.2rem; }
+.section-header { font-size: 1.05rem; font-weight: 600; color: #c8a8f8; border-bottom: 1px solid #2a2d3a; padding-bottom: 0.4rem; margin: 1.8rem 0 1rem; }
+.step-badge { display: inline-block; background: #6c3fdb; color: #fff; font-size: 0.7rem; font-weight: 700; padding: 0.15rem 0.55rem; border-radius: 999px; margin-right: 0.5rem; letter-spacing: 0.04em; vertical-align: middle; }
+.pill-ok   { background:#1a3a2a; color:#4ade80; border:1px solid #4ade80; border-radius:999px; padding:0.1rem 0.7rem; font-size:0.78rem; }
+.pill-warn { background:#3a2a1a; color:#fb923c; border:1px solid #fb923c; border-radius:999px; padding:0.1rem 0.7rem; font-size:0.78rem; }
+.thin-rule { border:none; border-top:1px solid #2a2d3a; margin:1.5rem 0; }
 </style>
 """, unsafe_allow_html=True)
 
 with st.sidebar:
-    st.markdown("## 🔬 Visual Debugger")
+    st.markdown("## Visual Debugger")
     st.markdown("*Finds problems in your image dataset before you spend time training a model on it*")
     st.markdown("---")
     mode = st.radio(
-        "Mode", ["📂  Upload & Label", "🩺  Run Diagnostics"],
+        "Mode", ["Upload & Label", "Run Diagnostics"],
         label_visibility="collapsed",
         help="Start with Upload & Label to bring in your data. Once embeddings are saved, switch to Run Diagnostics to check for issues.",
     )
     st.markdown("---")
     st.markdown("#### How this works")
     st.markdown(
-        "**Step 1: Upload & Label**\n"
+        "**Step 1: Upload & Label.** "
         "Bring in a dataset ZIP, fill in any missing labels automatically, and save a numeric summary (\"embeddings\") of every image.\n\n"
-        "**Step 2: Run Diagnostics**\n"
+        "**Step 2: Run Diagnostics.** "
         "Check for duplicate images, class imbalance, unusual outliers, and bias, then get plain-language fix suggestions."
     )
     st.markdown("---")
@@ -128,18 +81,18 @@ mode = mode.split("  ")[-1]
 # MODE 1: Upload & Label
 # ══════════════════════════════════════════════════════════════════════════════
 if mode == "Upload & Label":
-    st.markdown("# 📂 Upload & Label Dataset")
+    st.markdown("# Upload & Label Dataset")
     st.markdown("Please upload your image dataset below so it can be examined and analyzed for duplicates, imbalance, and quality issues.")
 
     st.markdown('<div class="section-header">Is your dataset supervised or unlabeled?</div>', unsafe_allow_html=True)
     dataset_kind = st.radio(
         "Dataset type",
-        ["✅ Supervised: all images are labeled", "⬜ Unlabeled: some or all labels are missing"],
+        ["Supervised: all images are labeled", "Unlabeled: some or all labels are missing"],
         label_visibility="collapsed",
         help="This just decides what upload instructions to show you; the tool detects the actual folder structure automatically either way.",
     )
 
-    if dataset_kind.startswith("✅"):
+    if dataset_kind.startswith("Supervised"):
         st.info(
             "**Supervised** means every image already belongs to a known class, e.g. you know which photos are cats vs. dogs.\n\n"
             "**How to upload:** zip your images into one subfolder per class: for example, `dataset.zip` containing `cats/`, `dogs/`, "
@@ -151,7 +104,7 @@ if mode == "Upload & Label":
             "**How to upload:** zip your sorted images into class subfolders (`cats/`, `dogs/`, ...) if you have any, and leave the rest "
             "loose in the same zip (or in a folder named `unlabeled/`). If you have at least a handful of labeled examples per class, "
             "Step 1 below can guess labels for the rest by comparing images to the ones you've already sorted.\n\n"
-            "⚠️ **If you have zero labels at all:** this tool can't invent labels from nothing. Step 1 needs some labeled examples to "
+            "**If you have zero labels at all:** this tool can't invent labels from nothing. Step 1 needs some labeled examples to "
             "learn from. With zero labels, just skip Step 1; you can still run duplicate detection, outlier detection, and embedding "
             "visualization in the Diagnostics step, since none of those need labels."
         )
@@ -209,7 +162,7 @@ if mode == "Upload & Label":
             f'<div class="metric-card"><div class="label">Classes</div><div class="value">{n_cls}</div></div>'
             '</div>', unsafe_allow_html=True)
         if n_unlab > 0:
-            st.caption(f"💡 {n_unlab} images have no label yet. Step 1 below can guess labels for them if you have at least a few labeled examples per class.")
+            st.caption(f"{n_unlab} images have no label yet. Step 1 below can guess labels for them if you have at least a few labeled examples per class.")
 
         st.markdown('<div class="section-header">Image preview</div>', unsafe_allow_html=True)
         img_paths = [r["path"] for r in records if r["path"].lower().endswith((".png",".jpg",".jpeg"))][:12]
@@ -220,7 +173,7 @@ if mode == "Upload & Label":
             except Exception:
                 pass
 
-        with st.expander("📊 Dataset distributions"):
+        with st.expander("Dataset distributions"):
             c1, c2 = st.columns(2)
             c1.pyplot(viz.plot_class_distribution(records))
             c2.pyplot(viz.plot_brightness_histogram(records))
@@ -228,18 +181,18 @@ if mode == "Upload & Label":
             res_summary = viz.summarize_resolutions(records)
             if res_summary["is_uniform"] and res_summary["distinct_resolutions"]:
                 w, h = res_summary["distinct_resolutions"][0][0]
-                st.caption(f"📐 All images are the same size: **{w} × {h}** pixels. No scatter plot needed since there's no variation to show.")
+                st.caption(f"All images are the same size: **{w} × {h}** pixels. No scatter plot needed since there's no variation to show.")
             elif res_summary["distinct_resolutions"]:
                 st.pyplot(viz.plot_resolution_scatter(records))
 
             corrupt_summary = viz.summarize_corruption(records)
             if corrupt_summary["corrupt_count"] == 0:
-                st.caption(f"✅ All **{corrupt_summary['total']}** images opened correctly; none were corrupt or unreadable.")
+                st.caption(f"All **{corrupt_summary['total']}** images opened correctly; none were corrupt or unreadable.")
             else:
-                st.warning(f"⚠️ **{corrupt_summary['corrupt_count']}** of {corrupt_summary['total']} images couldn't be opened:")
+                st.warning(f"**{corrupt_summary['corrupt_count']}** of {corrupt_summary['total']} images couldn't be opened:")
                 st.code("\n".join(corrupt_summary["corrupt_paths"][:20]))
 
-        st.markdown('<div class="section-header"><span class="step-badge">1</span> Semi-supervised labeling</div>', unsafe_allow_html=True)
+        st.markdown('<div class="section-header"><span class="step-badge">STEP 1</span> Semi-supervised labeling</div>', unsafe_allow_html=True)
 
         if n_unlab == 0:
             st.info("All samples already labeled, skipping label propagation.")
@@ -251,7 +204,7 @@ if mode == "Upload & Label":
             k_neighbors     = col_b.slider("Neighbors (k)", 1, 10, 5)
             conf_threshold  = col_c.slider("Confidence threshold", 0.0, 1.0, 0.7, 0.05)
 
-            if st.button("▶ Run label propagation"):
+            if st.button("Run label propagation"):
                 with st.spinner("Extracting embeddings and propagating labels..."):
                     image_paths    = [r["path"] for r in records if os.path.isfile(r["path"])]
                     partial_labels = [r.get("label") for r in records]
@@ -264,7 +217,7 @@ if mode == "Upload & Label":
                         st.success("Label propagation complete.")
                         st.dataframe(results_df.head(10), use_container_width=True)
                         csv_bytes = results_df.to_csv(index=False).encode("utf-8")
-                        st.download_button("⬇ Download labeled CSV", data=csv_bytes,
+                        st.download_button("Download labeled CSV", data=csv_bytes,
                                            file_name="semi_supervised_labels.csv", mime="text/csv")
                         label_map = dict(zip(results_df["image_path"], results_df["final_label"]))
                         for r in records:
@@ -274,7 +227,7 @@ if mode == "Upload & Label":
                         st.error(f"Label propagation failed: {e}")
             final_records = records
 
-        st.markdown('<div class="section-header"><span class="step-badge">2</span> Extract & save embeddings</div>', unsafe_allow_html=True)
+        st.markdown('<div class="section-header"><span class="step-badge">STEP 2</span> Extract & save embeddings</div>', unsafe_allow_html=True)
         st.caption(
             "An embedding is a numeric fingerprint of an image, a list of a few hundred numbers that captures what's "
             "visually *in* the image, produced by a pretrained vision model. Two similar-looking images get similar "
@@ -283,7 +236,7 @@ if mode == "Upload & Label":
         )
         emb_backbone = st.selectbox("Backbone for embeddings", ["resnet18", "clip"], key="emb_bb")
 
-        if st.button("▶ Extract embeddings"):
+        if st.button("Extract embeddings"):
             img_paths_all = [
                 r["path"] for r in final_records
                 if os.path.isfile(r["path"]) and r["path"].lower().endswith((".jpg",".jpeg",".png",".bmp"))
@@ -313,7 +266,7 @@ if mode == "Upload & Label":
 # MODE 2: Run Diagnostics
 # ══════════════════════════════════════════════════════════════════════════════
 elif mode == "Run Diagnostics":
-    st.markdown("# 🩺 Run Diagnostics")
+    st.markdown("# Run Diagnostics")
 
     def _load_from_outputs():
         # Bug fix: don't assume resnet18; check for whichever backbone's
@@ -385,8 +338,8 @@ elif mode == "Run Diagnostics":
         '</div>', unsafe_allow_html=True)
 
     tab_dup, tab_imb, tab_out, tab_emb, tab_inf, tab_rep = st.tabs([
-        "🔁 Duplicates", "⚖️ Imbalance", "🎯 Outliers",
-        "🧭 Embeddings", "🔍 Influence", "🛠 Repair",
+        "Duplicates", "Imbalance", "Outliers",
+        "Embeddings", "Influence", "Repair",
     ])
 
     with tab_dup:
@@ -405,7 +358,7 @@ elif mode == "Run Diagnostics":
                         st.warning(f"Found **{len(summary_dup)}** duplicate clusters ({affected} images affected).")
                         st.dataframe(pd.DataFrame(summary_dup), use_container_width=True)
                         # Bug B4 fix: bytes not path
-                        st.download_button("⬇ Download duplicate report",
+                        st.download_button("Download duplicate report",
                                            data=pd.DataFrame(summary_dup).to_csv(index=False).encode("utf-8"),
                                            file_name="duplicates_report.csv", mime="text/csv")
                         st.session_state["dup_report"] = {"num_duplicate_clusters": len(summary_dup), "total_affected": affected}
@@ -524,7 +477,7 @@ elif mode == "Run Diagnostics":
 
         n_real_classes = len([c for c in np.unique(labels) if str(c).lower() != "unknown"])
         if len(embeddings) > 5000:
-            st.info("Large dataset detected: near-duplicate / influence scanning can take a while. Grab a coffee ☕")
+            st.info("Large dataset detected: near-duplicate / influence scanning can take a while.")
 
         if st.button("Run problematic-sample analysis"):
             if n_real_classes < 2:
@@ -543,7 +496,7 @@ elif mode == "Run Diagnostics":
                             cand_display["reasons"] = cand_display["reasons"].apply(lambda r: ", ".join(r))
                             st.session_state["problematic_candidates"] = cand
                             st.dataframe(cand_display, use_container_width=True)
-                            st.download_button("⬇ Download candidates",
+                            st.download_button("Download candidates",
                                                data=cand_display.to_csv(index=False).encode("utf-8"),
                                                file_name="problematic_candidates.csv", mime="text/csv")
                             st.session_state["influence_report"] = {"n_flagged": result["n_flagged"]}
@@ -633,7 +586,7 @@ elif mode == "Run Diagnostics":
                 try:
                     repaired_path = apply_repairs(full_df, label_col="label")
                     with open(repaired_path, "rb") as f:
-                        st.download_button("⬇ Download repaired dataset CSV",
+                        st.download_button("Download repaired dataset CSV",
                                            data=f.read(),
                                            file_name="repaired_dataset.csv", mime="text/csv")
                     st.success("Repaired dataset ready.")
