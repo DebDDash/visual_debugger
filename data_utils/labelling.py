@@ -18,12 +18,20 @@ except Exception:
     _HAS_FAISS = False
 
 
-def get_pretrained_model(backbone="resnet18", device="cpu"):
+def get_pretrained_model(backbone="resnet18", device=None):
     """
     Load pretrained model (ResNet18 or CLIP) for feature extraction.
-    Device is forced to CPU for stability on macOS.
+    Auto-detects CUDA/MPS if available, falling back to CPU only when
+    neither exists — this used to be hardcoded to CPU, which made Step 1
+    dramatically slower than Step 2's extraction on any machine with a GPU.
     """
-    device = device or "cpu"
+    if device is None:
+        if torch.cuda.is_available():
+            device = "cuda"
+        elif getattr(torch.backends, "mps", None) is not None and torch.backends.mps.is_available():
+            device = "mps"
+        else:
+            device = "cpu"
 
     if backbone.lower() == "resnet18":
         try:
@@ -146,13 +154,13 @@ def filter_pseudo_labels(pred_labels, confidences, threshold=0.7):
 
 
 def semi_supervised_labeling(image_paths, partial_labels, backbone="resnet18", k=5, conf_threshold=0.7,
-                             use_faiss=True, batch_size=8):
+                             use_faiss=True, batch_size=32):
     """
     Full pipeline. Returns (results_df, embeddings).
     - partial_labels: list-like where unlabeled entries are None or np.nan
     """
-    device = "cpu"
-    model, preprocess = get_pretrained_model(backbone, device=device)
+    model, preprocess = get_pretrained_model(backbone, device=None)  # auto-detect CUDA/MPS
+    device = next(model.parameters()).device.type
     use_clip = (backbone.lower() == "clip")
 
     embeddings = extract_embeddings(image_paths, model, preprocess, device=device,
