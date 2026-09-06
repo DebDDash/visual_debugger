@@ -209,7 +209,7 @@ if mode == "Upload & Label":
                     image_paths    = [r["path"] for r in records if os.path.isfile(r["path"])]
                     partial_labels = [r.get("label") for r in records]
                     try:
-                        results_df, _ = semi_supervised_labeling(
+                        results_df, step1_embeddings = semi_supervised_labeling(
                             image_paths, partial_labels,
                             backbone=backbone_choice, k=k_neighbors,
                             conf_threshold=conf_threshold,
@@ -223,6 +223,11 @@ if mode == "Upload & Label":
                         for r in records:
                             if r.get("label") is None:
                                 r["label"] = label_map.get(r["path"])
+                        # Cache these so Step 2 doesn't recompute embeddings for the
+                        # same images from scratch — that was doubling total wait
+                        # time on large datasets.
+                        st.session_state["step1_embedding_cache"] = dict(zip(image_paths, step1_embeddings))
+                        st.session_state["step1_backbone"] = backbone_choice
                     except Exception as e:
                         st.error(f"Label propagation failed: {e}")
             final_records = records
@@ -241,11 +246,23 @@ if mode == "Upload & Label":
                 r["path"] for r in final_records
                 if os.path.isfile(r["path"]) and r["path"].lower().endswith((".jpg",".jpeg",".png",".bmp"))
             ]
+            cache = st.session_state.get("step1_embedding_cache")
+            cache_backbone = st.session_state.get("step1_backbone")
+            reusable = (
+                cache is not None
+                and cache_backbone == emb_backbone
+                and all(p in cache for p in img_paths_all)
+            )
             with st.spinner(f"Extracting embeddings with {emb_backbone}..."):
                 try:
-                    extractor  = EmbeddingExtractor(backbone=emb_backbone)
-                    embeddings, ids = extractor.extract_embeddings(img_paths_all)
-                    extractor.save_embeddings(embeddings, ids, output_dir=OUTPUTS_DIR)
+                    if reusable:
+                        st.info("Reusing the embeddings already computed in Step 1, no need to run the model again.")
+                        embeddings = np.stack([cache[p] for p in img_paths_all])
+                        ids = img_paths_all
+                    else:
+                        extractor  = EmbeddingExtractor(backbone=emb_backbone)
+                        embeddings, ids = extractor.extract_embeddings(img_paths_all)
+                        extractor.save_embeddings(embeddings, ids, output_dir=OUTPUTS_DIR)
 
                     id_to_label = {r["path"]: str(r.get("label", "unknown")) for r in final_records}
                     labels_arr  = np.array([id_to_label.get(i, "unknown") for i in ids])
