@@ -40,19 +40,65 @@ st.set_page_config(
 
 st.markdown("""
 <style>
-[data-testid="stSidebar"] { background: #0f1117; }
-[data-testid="stSidebar"] * { color: #e0e0e0 !important; }
-.block-container { padding-top: 2rem; max-width: 1100px; }
-.metric-row { display: flex; gap: 1rem; margin-bottom: 1.5rem; }
-.metric-card { flex: 1; background: #1a1d27; border: 1px solid #2a2d3a; border-radius: 10px; padding: 1.1rem 1.4rem; }
-.metric-card .label { font-size: 0.75rem; color: #888; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 0.3rem; }
-.metric-card .value { font-size: 1.8rem; font-weight: 700; color: #e0e0e0; }
-.metric-card .sub { font-size: 0.75rem; color: #666; margin-top: 0.2rem; }
-.section-header { font-size: 1.05rem; font-weight: 600; color: #c8a8f8; border-bottom: 1px solid #2a2d3a; padding-bottom: 0.4rem; margin: 1.8rem 0 1rem; }
-.step-badge { display: inline-block; background: #6c3fdb; color: #fff; font-size: 0.7rem; font-weight: 700; padding: 0.15rem 0.55rem; border-radius: 999px; margin-right: 0.5rem; letter-spacing: 0.04em; vertical-align: middle; }
-.pill-ok   { background:#1a3a2a; color:#4ade80; border:1px solid #4ade80; border-radius:999px; padding:0.1rem 0.7rem; font-size:0.78rem; }
-.pill-warn { background:#3a2a1a; color:#fb923c; border:1px solid #fb923c; border-radius:999px; padding:0.1rem 0.7rem; font-size:0.78rem; }
-.thin-rule { border:none; border-top:1px solid #2a2d3a; margin:1.5rem 0; }
+@import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,700&family=Work+Sans:wght@400;500;600&display=swap');
+
+:root {
+  --bg: #14120f;
+  --surface: #1e1a15;
+  --line: #3a3226;
+  --ink: #ece5d8;
+  --ink-muted: #9c9280;
+  --flag: #c1440e;
+  --safe: #7a9b6e;
+}
+
+html, body, [data-testid="stAppViewContainer"], .stApp { background: var(--bg) !important; }
+[data-testid="stAppViewContainer"] * { font-family: 'Work Sans', sans-serif; color: var(--ink); }
+h1, h2, h3, .section-header { font-family: 'Fraunces', serif !important; }
+
+[data-testid="stSidebar"] { background: #100e0b; border-right: 1px solid var(--line); }
+[data-testid="stSidebar"] * { color: var(--ink) !important; font-family: 'Work Sans', sans-serif !important; }
+
+.block-container { padding-top: 2rem; max-width: 1080px; }
+h1 { font-weight: 600; font-size: 2.1rem; letter-spacing: -0.01em; }
+
+.metric-row { display: flex; gap: 0; margin-bottom: 1.8rem; border: 1px solid var(--line); }
+.metric-card { flex: 1; background: var(--surface); padding: 1rem 1.3rem; border-right: 1px solid var(--line); }
+.metric-card:last-child { border-right: none; }
+.metric-card .label { font-size: 0.72rem; color: var(--ink-muted); margin-bottom: 0.35rem; }
+.metric-card .value { font-family: 'Fraunces', serif; font-variant-numeric: tabular-nums; font-size: 2rem; font-weight: 600; }
+.metric-card .sub { font-size: 0.72rem; color: var(--ink-muted); margin-top: 0.15rem; }
+
+.section-header { font-size: 1.25rem; font-weight: 600; border-bottom: 1px solid var(--line); padding-bottom: 0.5rem; margin: 2rem 0 1.1rem; }
+
+.step-badge {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 1.6rem; height: 1.6rem; border-radius: 50%;
+  border: 1px solid var(--flag); color: var(--flag) !important;
+  font-family: 'Fraunces', serif; font-size: 0.85rem; font-weight: 600;
+  margin-right: 0.6rem; vertical-align: middle;
+}
+
+.pill-ok   { background: transparent; color: var(--safe) !important; border: 1px solid var(--safe); border-radius: 3px; padding: 0.1rem 0.6rem; font-size: 0.78rem; }
+.pill-warn { background: transparent; color: var(--flag) !important; border: 1px solid var(--flag); border-radius: 3px; padding: 0.1rem 0.6rem; font-size: 0.78rem; }
+.thin-rule { border: none; border-top: 1px solid var(--line); margin: 1.6rem 0; }
+
+.stButton > button {
+    background: transparent; border: 1px solid var(--flag); color: var(--flag) !important;
+    border-radius: 2px; font-weight: 500;
+}
+.stButton > button:hover { background: var(--flag); color: var(--bg) !important; }
+.stButton > button p { color: inherit !important; }
+
+[data-baseweb="tab-list"] { border-bottom: 1px solid var(--line); gap: 0; background: transparent; }
+[data-baseweb="tab"] { color: var(--ink-muted) !important; }
+[data-baseweb="tab"][aria-selected="true"] { color: var(--ink) !important; border-bottom: 2px solid var(--flag) !important; }
+[data-baseweb="tab-highlight"] { background-color: var(--flag) !important; }
+
+[data-testid="stExpander"] { border: 1px solid var(--line); border-radius: 2px; background: var(--surface); }
+[data-testid="stFileUploader"] { border: 1px dashed var(--line); border-radius: 2px; padding: 0.5rem; }
+
+.stAlert { border-radius: 2px !important; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -68,18 +114,18 @@ with st.sidebar:
     st.markdown("---")
     st.markdown("#### How this works")
     st.markdown(
-        "**Step 1 — Upload & Label**\n"
+        "**Step 1: Upload & Label**\n"
         "Bring in a dataset ZIP, fill in any missing labels automatically, and save a numeric summary (\"embeddings\") of every image.\n\n"
-        "**Step 2 — Run Diagnostics**\n"
-        "Check for duplicate images, class imbalance, unusual outliers, and bias — then get plain-language fix suggestions."
+        "**Step 2: Run Diagnostics**\n"
+        "Check for duplicate images, class imbalance, unusual outliers, and bias, then get plain-language fix suggestions."
     )
     st.markdown("---")
-    st.caption("DES646 · IIT Kanpur · 2025")
+    st.caption("A DES646 project at IIT Kanpur, 2025")
 
 mode = mode.split("  ")[-1]
 
 # ══════════════════════════════════════════════════════════════════════════════
-# MODE 1 — Upload & Label
+# MODE 1: Upload & Label
 # ══════════════════════════════════════════════════════════════════════════════
 if mode == "Upload & Label":
     st.markdown("# 📂 Upload & Label Dataset")
@@ -88,15 +134,15 @@ if mode == "Upload & Label":
     st.markdown('<div class="section-header">Is your dataset supervised or unlabeled?</div>', unsafe_allow_html=True)
     dataset_kind = st.radio(
         "Dataset type",
-        ["✅ Supervised — all images are labeled", "⬜ Unlabeled — some or all labels are missing"],
+        ["✅ Supervised: all images are labeled", "⬜ Unlabeled: some or all labels are missing"],
         label_visibility="collapsed",
-        help="This just decides what upload instructions to show you — the tool detects the actual folder structure automatically either way.",
+        help="This just decides what upload instructions to show you; the tool detects the actual folder structure automatically either way.",
     )
 
     if dataset_kind.startswith("✅"):
         st.info(
-            "**Supervised** means every image already belongs to a known class — e.g. you know which photos are cats vs. dogs.\n\n"
-            "**How to upload:** zip your images into one subfolder per class — for example, `dataset.zip` containing `cats/`, `dogs/`, "
+            "**Supervised** means every image already belongs to a known class, e.g. you know which photos are cats vs. dogs.\n\n"
+            "**How to upload:** zip your images into one subfolder per class: for example, `dataset.zip` containing `cats/`, `dogs/`, "
             "`birds/`. Once embeddings are extracted below, you can go straight to Run Diagnostics."
         )
     else:
@@ -105,7 +151,7 @@ if mode == "Upload & Label":
             "**How to upload:** zip your sorted images into class subfolders (`cats/`, `dogs/`, ...) if you have any, and leave the rest "
             "loose in the same zip (or in a folder named `unlabeled/`). If you have at least a handful of labeled examples per class, "
             "Step 1 below can guess labels for the rest by comparing images to the ones you've already sorted.\n\n"
-            "⚠️ **If you have zero labels at all:** this tool can't invent labels from nothing — Step 1 needs some labeled examples to "
+            "⚠️ **If you have zero labels at all:** this tool can't invent labels from nothing. Step 1 needs some labeled examples to "
             "learn from. With zero labels, just skip Step 1; you can still run duplicate detection, outlier detection, and embedding "
             "visualization in the Diagnostics step, since none of those need labels."
         )
@@ -124,7 +170,7 @@ if mode == "Upload & Label":
         # Persist the extracted images to a stable location for the rest of
         # the session. Later steps (Run Diagnostics, robustness/quality
         # analysis) need to re-read the actual image files, not just the
-        # embeddings — a tempfile.mkdtemp() directory that gets deleted right
+        # embeddings: a tempfile.mkdtemp() directory that gets deleted right
         # after embedding extraction means those steps can never find the
         # images again, which is what was causing "Original image files not
         # found on disk."
@@ -163,7 +209,7 @@ if mode == "Upload & Label":
             f'<div class="metric-card"><div class="label">Classes</div><div class="value">{n_cls}</div></div>'
             '</div>', unsafe_allow_html=True)
         if n_unlab > 0:
-            st.caption(f"💡 {n_unlab} images have no label yet — Step 1 below can guess labels for them if you have at least a few labeled examples per class.")
+            st.caption(f"💡 {n_unlab} images have no label yet. Step 1 below can guess labels for them if you have at least a few labeled examples per class.")
 
         st.markdown('<div class="section-header">Image preview</div>', unsafe_allow_html=True)
         img_paths = [r["path"] for r in records if r["path"].lower().endswith((".png",".jpg",".jpeg"))][:12]
@@ -178,14 +224,25 @@ if mode == "Upload & Label":
             c1, c2 = st.columns(2)
             c1.pyplot(viz.plot_class_distribution(records))
             c2.pyplot(viz.plot_brightness_histogram(records))
-            c3, c4 = st.columns(2)
-            c3.pyplot(viz.plot_resolution_scatter(records))
-            c4.pyplot(viz.plot_corruption_pie(records))
 
-        st.markdown('<div class="section-header"><span class="step-badge">STEP 1</span> Semi-supervised labeling</div>', unsafe_allow_html=True)
+            res_summary = viz.summarize_resolutions(records)
+            if res_summary["is_uniform"] and res_summary["distinct_resolutions"]:
+                w, h = res_summary["distinct_resolutions"][0][0]
+                st.caption(f"📐 All images are the same size: **{w} × {h}** pixels. No scatter plot needed since there's no variation to show.")
+            elif res_summary["distinct_resolutions"]:
+                st.pyplot(viz.plot_resolution_scatter(records))
+
+            corrupt_summary = viz.summarize_corruption(records)
+            if corrupt_summary["corrupt_count"] == 0:
+                st.caption(f"✅ All **{corrupt_summary['total']}** images opened correctly; none were corrupt or unreadable.")
+            else:
+                st.warning(f"⚠️ **{corrupt_summary['corrupt_count']}** of {corrupt_summary['total']} images couldn't be opened:")
+                st.code("\n".join(corrupt_summary["corrupt_paths"][:20]))
+
+        st.markdown('<div class="section-header"><span class="step-badge">1</span> Semi-supervised labeling</div>', unsafe_allow_html=True)
 
         if n_unlab == 0:
-            st.info("All samples already labeled — skipping label propagation.")
+            st.info("All samples already labeled, skipping label propagation.")
             final_records = records
         else:
             st.write(f"Detected **{n_unlab}** unlabeled samples out of {n}.")
@@ -217,7 +274,13 @@ if mode == "Upload & Label":
                         st.error(f"Label propagation failed: {e}")
             final_records = records
 
-        st.markdown('<div class="section-header"><span class="step-badge">STEP 2</span> Extract & save embeddings</div>', unsafe_allow_html=True)
+        st.markdown('<div class="section-header"><span class="step-badge">2</span> Extract & save embeddings</div>', unsafe_allow_html=True)
+        st.caption(
+            "An embedding is a numeric fingerprint of an image, a list of a few hundred numbers that captures what's "
+            "visually *in* the image, produced by a pretrained vision model. Two similar-looking images get similar "
+            "fingerprints. Everything in the next step (duplicates, outliers, clusters, influence) is computed by "
+            "comparing these fingerprints instead of comparing raw pixels, which is both faster and more meaningful."
+        )
         emb_backbone = st.selectbox("Backbone for embeddings", ["resnet18", "clip"], key="emb_bb")
 
         if st.button("▶ Extract embeddings"):
@@ -247,13 +310,13 @@ if mode == "Upload & Label":
         st.caption(f"Uploaded images are kept at `{tmp_dir}` for the rest of this session so later steps (like the robustness/quality analysis) can still read them.")
 
 # ══════════════════════════════════════════════════════════════════════════════
-# MODE 2 — Run Diagnostics
+# MODE 2: Run Diagnostics
 # ══════════════════════════════════════════════════════════════════════════════
 elif mode == "Run Diagnostics":
     st.markdown("# 🩺 Run Diagnostics")
 
     def _load_from_outputs():
-        # Bug fix: don't assume resnet18 — check for whichever backbone's
+        # Bug fix: don't assume resnet18; check for whichever backbone's
         # embeddings actually exist on disk (glob for embeddings_*.npy).
         candidates = sorted(glob.glob(os.path.join(OUTPUTS_DIR, "embeddings_*.npy")))
         lbl_path = os.path.join(OUTPUTS_DIR, "labels.npy")
@@ -277,7 +340,7 @@ elif mode == "Run Diagnostics":
     else:
         embeddings, labels, ids = _load_from_outputs()
         if embeddings is not None:
-            st.info(f"Loaded saved embeddings from `{OUTPUTS_DIR}/` — shape {embeddings.shape}.")
+            st.info(f"Loaded saved embeddings from `{OUTPUTS_DIR}/` (shape {embeddings.shape}).")
         else:
             st.warning("No saved embeddings found. Upload a dataset ZIP to extract embeddings now.")
             up = st.file_uploader("Dataset ZIP", type=["zip"])
@@ -346,8 +409,24 @@ elif mode == "Run Diagnostics":
                                            data=pd.DataFrame(summary_dup).to_csv(index=False).encode("utf-8"),
                                            file_name="duplicates_report.csv", mime="text/csv")
                         st.session_state["dup_report"] = {"num_duplicate_clusters": len(summary_dup), "total_affected": affected}
+                        st.session_state["dup_clusters_view"] = summary_dup
+
                 except Exception as e:
                     st.error(f"Duplicate detection failed: {e}")
+
+        if st.session_state.get("dup_clusters_view"):
+            st.markdown("**See for yourself**")
+            st.caption("Each cluster below shows the flagged representative image next to what the tool thinks are its duplicates, a quick visual check for whether these really are duplicates or just visually similar.")
+            for i, cluster in enumerate(st.session_state["dup_clusters_view"]):
+                with st.expander(f"Cluster {i}: {cluster['count']} images"):
+                    thumb_cols = st.columns(min(cluster["count"], 6))
+                    all_paths = [cluster["representative"]] + list(cluster["duplicates"])
+                    for j, p in enumerate(all_paths[:6]):
+                        try:
+                            caption = "Representative" if j == 0 else "Duplicate"
+                            thumb_cols[j].image(Image.open(p), caption=caption, use_container_width=True)
+                        except Exception:
+                            thumb_cols[j].caption(f"(couldn't load {os.path.basename(str(p))})")
 
     with tab_imb:
         st.markdown('<div class="section-header">Class imbalance analysis</div>', unsafe_allow_html=True)
@@ -358,8 +437,11 @@ elif mode == "Run Diagnostics":
                     diversity = report["diversity"]
                     c1, c2, c3 = st.columns(3)
                     c1.metric("Shannon entropy",    round(diversity["shannon_entropy"], 3))
-                    c2.metric("Gini index",         round(diversity["gini_index"], 3))
+                    c1.caption("Higher = classes are more evenly spread. 0 means everything is in one class.")
+                    c2.metric("Gini-Simpson diversity", round(diversity["gini_index"], 3))
+                    c2.caption("Not the economic Gini coefficient. Higher, closer to 1, means MORE balanced here, the opposite of what the name usually implies.")
                     c3.metric("Effective classes",  round(diversity["effective_classes"], 2))
+                    c3.caption(f"Behaves like this many equally-sized classes. Compare to your actual {n_cls} classes.")
                     st.bar_chart(report["class_distribution"].set_index("class")["count"])
                     if report["underrepresented_classes"]:
                         st.warning(f"Underrepresented classes: {report['underrepresented_classes']}")
@@ -374,22 +456,40 @@ elif mode == "Run Diagnostics":
 
     with tab_out:
         st.markdown('<div class="section-header">Outlier detection</div>', unsafe_allow_html=True)
+        st.caption(
+            "This flags images that sit unusually far from the rest of their class in embedding space, e.g. a "
+            "mislabeled photo, a corrupted file, or a genuinely rare case. It doesn't remove anything automatically; "
+            "the point is to surface a short list for you to eyeball and decide, per image, whether to keep, "
+            "relabel, or drop it (you can note your decisions and feed the keepers into Repair below)."
+        )
         if st.button("Run outlier detection"):
             with st.spinner("Detecting outliers..."):
                 try:
                     out_report = summarize_outliers(embeddings, labels)
                     emb_out    = out_report["embedding_outliers"]
                     knn_scores = out_report["knn_scores"]
-                    st.markdown(f"**{len(emb_out)}** potential outliers detected.")
+                    st.markdown(f"**{len(emb_out)}** potential outliers detected (the {emb_out['label'].nunique()} class(es) each contribute their most distant few).")
                     st.dataframe(emb_out, use_container_width=True)
-                    st.markdown("**KNN isolation scores** (higher = more isolated)")
+                    st.markdown("**KNN isolation scores**: how far each image sits from its nearest neighbors (higher = more isolated)")
                     st.line_chart(knn_scores)
                     st.session_state["outlier_report"] = {
                         "num_outliers": len(emb_out),
                         "mean_knn_score": float(np.mean(knn_scores)),
                     }
+                    st.session_state["outlier_view"] = emb_out
                 except Exception as e:
                     st.error(f"Outlier detection failed: {e}")
+
+        if st.session_state.get("outlier_view") is not None and len(st.session_state["outlier_view"]) > 0:
+            st.markdown("**See for yourself**")
+            emb_out = st.session_state["outlier_view"]
+            thumb_cols = st.columns(6)
+            for j, (_, row) in enumerate(emb_out.head(12).iterrows()):
+                try:
+                    p = ids[int(row["index"])]
+                    thumb_cols[j % 6].image(Image.open(p), caption=f"{row['label']}", use_container_width=True)
+                except Exception:
+                    pass
 
     with tab_emb:
         st.markdown('<div class="section-header">Embedding visualisation</div>', unsafe_allow_html=True)
@@ -408,15 +508,27 @@ elif mode == "Run Diagnostics":
 
     with tab_inf:
         st.markdown('<div class="section-header">Problematic samples & group analysis</div>', unsafe_allow_html=True)
-        st.caption("Flags samples that may be pushing training in the wrong direction. You choose what to keep or drop — nothing is removed automatically.")
+        st.caption("Flags samples that may be pushing training in the wrong direction. You choose what to keep or drop; nothing is removed automatically.")
+        with st.expander("How is this different from Outliers?"):
+            st.markdown(
+                "**Outliers** (previous tab) look only at what an image *looks like*: does it sit unusually far from "
+                "other images in its class, based purely on visual embedding distance? This needs no labels to matter "
+                "and says nothing about model training.\n\n"
+                "**Problematic samples** (this tab) actually trains a small classifier on your labels and measures how "
+                "much each image's gradient shaped that model, i.e. how much it personally influenced what the model "
+                "learned. An image can look completely ordinary (not an outlier at all) but still be high-influence if "
+                "it sits right on the boundary between two classes; conversely, a visually strange outlier might have "
+                "very little effect on training if the model easily ignores it. They're catching different problems, "
+                "which is why an image can show up in one list and not the other."
+            )
 
         n_real_classes = len([c for c in np.unique(labels) if str(c).lower() != "unknown"])
         if len(embeddings) > 5000:
-            st.info("Large dataset detected — near-duplicate / influence scanning can take a while. Grab a coffee ☕")
+            st.info("Large dataset detected: near-duplicate / influence scanning can take a while. Grab a coffee ☕")
 
         if st.button("Run problematic-sample analysis"):
             if n_real_classes < 2:
-                st.error("Cannot perform — needs more than 2 real classes to compute influence.")
+                st.error("Cannot perform: needs more than 2 real classes to compute influence.")
             else:
                 with st.spinner("Scoring influence, centroid distance, and duplicates..."):
                     try:
@@ -462,7 +574,7 @@ elif mode == "Run Diagnostics":
             st.metric("Label distribution parity (max group gap)", fairness["label_distribution_parity"])
             st.caption("0 = identical label distributions across groups; closer to 1 = groups differ sharply in which classes they contain. This is a data-composition signal, not a model-prediction fairness metric.")
         else:
-            st.warning("Sensitive-group fairness unavailable — no subgroup metadata was provided. "
+            st.warning("Sensitive-group fairness unavailable: no subgroup metadata was provided. "
                        "Demographic fairness metrics cannot be reliably computed without real group membership labels.")
             st.markdown("Running an **image-quality robustness analysis** instead (not a fairness metric):")
             if st.button("Run robustness / dataset bias analysis"):
@@ -470,7 +582,7 @@ elif mode == "Run Diagnostics":
                     try:
                         img_paths_valid = [p for p in ids if os.path.isfile(p)] if ids else []
                         if not img_paths_valid:
-                            st.error("Original image files not found on disk — can't compute quality properties from saved embeddings alone.")
+                            st.error("Original image files not found on disk: can't compute quality properties from saved embeddings alone.")
                         else:
                             qdf = compute_quality_properties(img_paths_valid, show_progress=False)
                             qdf = bucket_by_quality(qdf)
@@ -487,7 +599,7 @@ elif mode == "Run Diagnostics":
                             st.metric("Max disparity across quality tiers", round(disparity["max_disparity"], 4))
                             st.caption(disparity["note"])
                             if disparity["flag"]:
-                                st.warning("Notable disparity across image-quality tiers — low-quality images may behave differently in training.")
+                                st.warning("Notable disparity across image-quality tiers: low-quality images may behave differently in training.")
                     except Exception as e:
                         st.error(f"Robustness analysis failed: {e}")
 
