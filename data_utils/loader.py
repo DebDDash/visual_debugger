@@ -35,7 +35,7 @@ def _make_id(path: Path) -> str:
 
 _JUNK_DIR_NAMES = {"__MACOSX"}
 _IMG_EXTS = {'.jpg', '.jpeg', '.png', '.bmp', '.tiff', '.webp'}
-_UNLABELED_NAMES = {"unlabeled", "unannotated", "unknown", "untagged"}
+_UNLABELED_NAMES = {"unlabeled", "unlabelled", "unannotated", "unknown", "untagged"}
 
 
 def _is_junk_dir(p: Path) -> bool:
