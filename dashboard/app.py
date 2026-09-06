@@ -113,25 +113,44 @@ if mode == "Upload & Label":
                                      help="A .zip file containing your images, structured as described above.")
 
     if uploaded_zip:
-        raw_tmp_dir = tempfile.mkdtemp()
-        zip_path = os.path.join(raw_tmp_dir, uploaded_zip.name)
-        with open(zip_path, "wb") as f:
-            f.write(uploaded_zip.read())
-        with zipfile.ZipFile(zip_path, "r") as z:
-            z.extractall(raw_tmp_dir)
-
-        # Persist the extracted images to a stable location for the rest of
-        # the session. Later steps (Run Diagnostics, robustness/quality
-        # analysis) need to re-read the actual image files, not just the
-        # embeddings: a tempfile.mkdtemp() directory that gets deleted right
-        # after embedding extraction means those steps can never find the
-        # images again, which is what was causing "Original image files not
-        # found on disk."
         tmp_dir = os.path.join(OUTPUTS_DIR, "dataset_images")
-        if os.path.exists(tmp_dir):
-            shutil.rmtree(tmp_dir, ignore_errors=True)
-        shutil.copytree(raw_tmp_dir, tmp_dir)
-        shutil.rmtree(raw_tmp_dir, ignore_errors=True)
+        upload_key = f"{uploaded_zip.name}:{uploaded_zip.size}"
+
+        if st.session_state.get("persisted_upload_key") == upload_key and os.path.isdir(tmp_dir):
+            # Same upload as last rerun (e.g. you just moved a slider) — the
+            # images are already sitting in tmp_dir from before. Re-extracting
+            # and re-copying a 50k-image dataset on every single interaction
+            # was a real cost, not just a one-time thing.
+            pass
+        else:
+            raw_tmp_dir = tempfile.mkdtemp()
+            zip_path = os.path.join(raw_tmp_dir, uploaded_zip.name)
+            with open(zip_path, "wb") as f:
+                f.write(uploaded_zip.read())
+            with zipfile.ZipFile(zip_path, "r") as z:
+                z.extractall(raw_tmp_dir)
+
+            # Persist the extracted images to a stable location for the rest of
+            # the session. Later steps (Run Diagnostics, robustness/quality
+            # analysis) need to re-read the actual image files, not just the
+            # embeddings: a tempfile.mkdtemp() directory that gets deleted right
+            # after embedding extraction means those steps can never find the
+            # images again, which is what was causing "Original image files not
+            # found on disk."
+            #
+            # dirs_exist_ok=True matters here: if a previous run's cleanup of
+            # tmp_dir silently failed (e.g. a locked file, a stray .DS_Store),
+            # copytree would otherwise crash with FileExistsError even though
+            # os.path.exists() + rmtree looked fine a moment earlier.
+            try:
+                shutil.rmtree(tmp_dir)
+            except FileNotFoundError:
+                pass
+            except OSError:
+                pass  # best-effort cleanup; dirs_exist_ok below covers the rest
+            shutil.copytree(raw_tmp_dir, tmp_dir, dirs_exist_ok=True)
+            shutil.rmtree(raw_tmp_dir, ignore_errors=True)
+            st.session_state["persisted_upload_key"] = upload_key
 
         st.success(f"Extracted **{uploaded_zip.name}**")
 
