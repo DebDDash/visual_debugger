@@ -38,6 +38,28 @@ def plot_resolution_scatter(records):
     plt.tight_layout()
     return plt.gcf()
 
+def summarize_corruption(records):
+    """Returns corrupt/valid counts and the paths of any corrupt images. No chart needed for a binary fact."""
+    corrupt = [r["path"] for r in records if r["metadata"].get("is_corrupt")]
+    return {"total": len(records), "corrupt_count": len(corrupt), "corrupt_paths": corrupt}
+
+
+def summarize_resolutions(records):
+    """Returns distinct (width, height) resolutions and their counts. A scatter plot only earns its
+    place when there's more than one resolution in the dataset; otherwise it's a single overlapping dot."""
+    from collections import Counter
+    pairs = [
+        (r["metadata"].get("width"), r["metadata"].get("height"))
+        for r in records
+        if r["metadata"].get("width") and r["metadata"].get("height")
+    ]
+    counts = Counter(pairs)
+    return {
+        "distinct_resolutions": sorted(counts.items(), key=lambda x: -x[1]),
+        "is_uniform": len(counts) <= 1,
+    }
+
+
 def plot_corruption_pie(records):
     """Pie chart of corrupt vs valid images."""
     corrupt = sum(1 for r in records if r["metadata"].get("is_corrupt"))
