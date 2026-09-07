@@ -224,31 +224,38 @@ if mode == "Upload & Label":
             conf_threshold  = col_c.slider("Confidence threshold", 0.0, 1.0, 0.7, 0.05)
 
             if st.button("Run label propagation"):
-                with st.spinner("Extracting embeddings and propagating labels..."):
-                    image_paths    = [r["path"] for r in records if os.path.isfile(r["path"])]
-                    partial_labels = [r.get("label") for r in records]
-                    try:
-                        results_df, step1_embeddings = semi_supervised_labeling(
-                            image_paths, partial_labels,
-                            backbone=backbone_choice, k=k_neighbors,
-                            conf_threshold=conf_threshold,
-                        )
-                        st.success("Label propagation complete.")
-                        st.dataframe(results_df.head(10), use_container_width=True)
-                        csv_bytes = results_df.to_csv(index=False).encode("utf-8")
-                        st.download_button("Download labeled CSV", data=csv_bytes,
-                                           file_name="semi_supervised_labels.csv", mime="text/csv")
-                        label_map = dict(zip(results_df["image_path"], results_df["final_label"]))
-                        for r in records:
-                            if r.get("label") is None:
-                                r["label"] = label_map.get(r["path"])
-                        # Cache these so Step 2 doesn't recompute embeddings for the
-                        # same images from scratch — that was doubling total wait
-                        # time on large datasets.
-                        st.session_state["step1_embedding_cache"] = dict(zip(image_paths, step1_embeddings))
-                        st.session_state["step1_backbone"] = backbone_choice
-                    except Exception as e:
-                        st.error(f"Label propagation failed: {e}")
+                image_paths    = [r["path"] for r in records if os.path.isfile(r["path"])]
+                partial_labels = [r.get("label") for r in records]
+                progress_bar = st.progress(0, text="Starting...")
+
+                def _update_progress(done, total):
+                    progress_bar.progress(done / total, text=f"Extracted embeddings for {done:,} / {total:,} images")
+
+                try:
+                    results_df, step1_embeddings, device_used = semi_supervised_labeling(
+                        image_paths, partial_labels,
+                        backbone=backbone_choice, k=k_neighbors,
+                        conf_threshold=conf_threshold,
+                        progress_callback=_update_progress,
+                    )
+                    progress_bar.empty()
+                    st.caption(f"Ran on device: **{device_used}**" + (" (no GPU detected on this machine, so this ran on CPU)" if device_used == "cpu" else ""))
+                    st.success("Label propagation complete.")
+                    st.dataframe(results_df.head(10), use_container_width=True)
+                    csv_bytes = results_df.to_csv(index=False).encode("utf-8")
+                    st.download_button("Download labeled CSV", data=csv_bytes,
+                                       file_name="semi_supervised_labels.csv", mime="text/csv")
+                    label_map = dict(zip(results_df["image_path"], results_df["final_label"]))
+                    for r in records:
+                        if r.get("label") is None:
+                            r["label"] = label_map.get(r["path"])
+                    # Cache these so Step 2 doesn't recompute embeddings for the
+                    # same images from scratch. That was doubling total wait
+                    # time on large datasets.
+                    st.session_state["step1_embedding_cache"] = dict(zip(image_paths, step1_embeddings))
+                    st.session_state["step1_backbone"] = backbone_choice
+                except Exception as e:
+                    st.error(f"Label propagation failed: {e}")
             final_records = records
 
         st.markdown('<div class="section-header"><span class="step-badge">STEP 2</span> Extract & save embeddings</div>', unsafe_allow_html=True)
@@ -272,30 +279,36 @@ if mode == "Upload & Label":
                 and cache_backbone == emb_backbone
                 and all(p in cache for p in img_paths_all)
             )
-            with st.spinner(f"Extracting embeddings with {emb_backbone}..."):
-                try:
-                    if reusable:
-                        st.info("Reusing the embeddings already computed in Step 1, no need to run the model again.")
-                        embeddings = np.stack([cache[p] for p in img_paths_all])
-                        ids = img_paths_all
-                    else:
-                        extractor  = EmbeddingExtractor(backbone=emb_backbone)
-                        embeddings, ids = extractor.extract_embeddings(img_paths_all)
-                        extractor.save_embeddings(embeddings, ids, output_dir=OUTPUTS_DIR)
+            try:
+                if reusable:
+                    st.info("Reusing the embeddings already computed in Step 1, no need to run the model again.")
+                    embeddings = np.stack([cache[p] for p in img_paths_all])
+                    ids = img_paths_all
+                else:
+                    progress_bar = st.progress(0, text="Starting...")
 
-                    id_to_label = {r["path"]: str(r.get("label", "unknown")) for r in final_records}
-                    labels_arr  = np.array([id_to_label.get(i, "unknown") for i in ids])
-                    np.save(os.path.join(OUTPUTS_DIR, "labels.npy"), labels_arr)
-                    pd.DataFrame({"path": ids, "label": labels_arr}).to_csv(
-                        os.path.join(OUTPUTS_DIR, "labels.csv"), index=False)
+                    def _update_progress(done, total):
+                        progress_bar.progress(done / total, text=f"Extracted embeddings for {done:,} / {total:,} images")
 
-                    # Bug B1/B2 fix: persist to session state
-                    st.session_state["embeddings"] = embeddings
-                    st.session_state["labels"]     = labels_arr
-                    st.session_state["ids"]        = ids
-                    st.success(f"Extracted **{embeddings.shape[0]}** embeddings ({embeddings.shape[1]} dims). Saved to `{OUTPUTS_DIR}/`.")
-                except Exception as e:
-                    st.error(f"Embedding extraction failed: {e}")
+                    extractor  = EmbeddingExtractor(backbone=emb_backbone)
+                    embeddings, ids = extractor.extract_embeddings(img_paths_all, progress_callback=_update_progress)
+                    extractor.save_embeddings(embeddings, ids, output_dir=OUTPUTS_DIR)
+                    progress_bar.empty()
+                    st.caption(f"Ran on device: **{extractor.device}**" + (" (no GPU detected on this machine, so this ran on CPU)" if extractor.device == "cpu" else ""))
+
+                id_to_label = {r["path"]: str(r.get("label", "unknown")) for r in final_records}
+                labels_arr  = np.array([id_to_label.get(i, "unknown") for i in ids])
+                np.save(os.path.join(OUTPUTS_DIR, "labels.npy"), labels_arr)
+                pd.DataFrame({"path": ids, "label": labels_arr}).to_csv(
+                    os.path.join(OUTPUTS_DIR, "labels.csv"), index=False)
+
+                # Bug B1/B2 fix: persist to session state
+                st.session_state["embeddings"] = embeddings
+                st.session_state["labels"]     = labels_arr
+                st.session_state["ids"]        = ids
+                st.success(f"Extracted **{embeddings.shape[0]}** embeddings ({embeddings.shape[1]} dims). Saved to `{OUTPUTS_DIR}/`.")
+            except Exception as e:
+                st.error(f"Embedding extraction failed: {e}")
         st.caption(f"Uploaded images are kept at `{tmp_dir}` for the rest of this session so later steps (like the robustness/quality analysis) can still read them.")
 
 # ══════════════════════════════════════════════════════════════════════════════
