@@ -7,6 +7,7 @@ import torch
 import numpy as np
 import pandas as pd
 from tqdm import tqdm
+from concurrent.futures import ThreadPoolExecutor
 from torchvision import models, transforms
 from PIL import Image
 from sklearn.neighbors import NearestNeighbors
@@ -59,35 +60,48 @@ def get_pretrained_model(backbone="resnet18", device=None):
 
 
 @torch.no_grad()
-def extract_embeddings(image_paths, model, preprocess, device="cpu", use_clip=False, batch_size=8):
+def extract_embeddings(image_paths, model, preprocess, device="cpu", use_clip=False, batch_size=32, progress_callback=None):
     """
-    Extract embeddings for a list of image paths, CPU-safe and memory conservative.
-    Returns (N x D) numpy array.
+    Extract embeddings for a list of image paths. Returns (N x D) numpy array.
+
+    Loads and preprocesses each batch's images in parallel threads before
+    running the model forward pass — PIL's JPEG decoding and file I/O both
+    release Python's GIL, so this helps meaningfully even with no GPU at all,
+    on top of whatever the model forward pass itself gets from `device`.
+
+    progress_callback: optional callable(done, total) invoked after each
+    batch, so a caller (e.g. a Streamlit progress bar) can show real
+    progress instead of a silent spinner with no sense of how far along or
+    how much longer a large dataset will take.
     """
     device = device or "cpu"
     all_embeds = []
+    total = len(image_paths)
 
-    for i in tqdm(range(0, len(image_paths), batch_size), desc="Extracting embeddings", leave=False):
-        batch_imgs = []
-        for path in image_paths[i:i + batch_size]:
-            try:
-                img = Image.open(path).convert("RGB")
-                batch_imgs.append(preprocess(img))
-            except Exception:
-                continue
+    def _load_one(path):
+        try:
+            img = Image.open(path).convert("RGB")
+            return preprocess(img)
+        except Exception:
+            return None
 
-        if not batch_imgs:
-            continue
+    with ThreadPoolExecutor(max_workers=min(8, os.cpu_count() or 4)) as pool:
+        for i in tqdm(range(0, total, batch_size), desc="Extracting embeddings", leave=False):
+            batch_paths = image_paths[i:i + batch_size]
+            loaded = list(pool.map(_load_one, batch_paths))
+            batch_imgs = [t for t in loaded if t is not None]
 
-        batch = torch.stack(batch_imgs).to(device)
+            if batch_imgs:
+                batch = torch.stack(batch_imgs).to(device)
+                if use_clip:
+                    features = model.encode_image(batch)
+                else:
+                    features = model(batch)
+                features = torch.nn.functional.normalize(features, dim=1)
+                all_embeds.append(features.cpu().numpy())
 
-        if use_clip:
-            features = model.encode_image(batch)
-        else:
-            features = model(batch)
-
-        features = torch.nn.functional.normalize(features, dim=1)
-        all_embeds.append(features.cpu().numpy())
+            if progress_callback is not None:
+                progress_callback(min(i + batch_size, total), total)
 
     if not all_embeds:
         return np.zeros((0, 0), dtype=np.float32)
@@ -154,17 +168,19 @@ def filter_pseudo_labels(pred_labels, confidences, threshold=0.7):
 
 
 def semi_supervised_labeling(image_paths, partial_labels, backbone="resnet18", k=5, conf_threshold=0.7,
-                             use_faiss=True, batch_size=32):
+                             use_faiss=True, batch_size=32, progress_callback=None):
     """
-    Full pipeline. Returns (results_df, embeddings).
+    Full pipeline. Returns (results_df, embeddings, device_used).
     - partial_labels: list-like where unlabeled entries are None or np.nan
+    - progress_callback: optional callable(done, total), forwarded to extract_embeddings
     """
     model, preprocess = get_pretrained_model(backbone, device=None)  # auto-detect CUDA/MPS
     device = next(model.parameters()).device.type
     use_clip = (backbone.lower() == "clip")
 
     embeddings = extract_embeddings(image_paths, model, preprocess, device=device,
-                                    use_clip=use_clip, batch_size=batch_size)
+                                    use_clip=use_clip, batch_size=batch_size,
+                                    progress_callback=progress_callback)
 
     if embeddings.size == 0:
         results = pd.DataFrame({
@@ -174,7 +190,7 @@ def semi_supervised_labeling(image_paths, partial_labels, backbone="resnet18", k
             "final_label": [None] * len(image_paths),
             "confidence": [0.0] * len(image_paths)
         })
-        return results, embeddings
+        return results, embeddings, device
 
     pred_labels, confidences = propagate_labels(embeddings, partial_labels, k=k, use_faiss=use_faiss)
     # pred_labels only for unlabeled entries — we need arrays aligned with input length
@@ -196,4 +212,4 @@ def semi_supervised_labeling(image_paths, partial_labels, backbone="resnet18", k
         "confidence": full_conf.tolist()
     })
 
-    return results, embeddings
+    return results, embeddings, device
