@@ -40,13 +40,6 @@ Pillow==10.3.0
 # Windows — it is not a Windows-only or platform-specific choice.
 faiss-cpu==1.8.0
 
-# Embedding models
-# Single CLIP implementation used everywhere in this project
-# (embedding/extract.py and data_utils/labelling.py). Do not also install
-# the separate OpenAI `clip` package.
-open_clip_torch==2.24.0
-timm==1.0.3
-
 # Data / Arrow support
 pyarrow==14.0.2
 
