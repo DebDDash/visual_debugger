@@ -211,53 +211,82 @@ if mode == "Upload & Label":
                 st.warning(f"**{corrupt_summary['corrupt_count']}** of {corrupt_summary['total']} images couldn't be opened:")
                 st.code("\n".join(corrupt_summary["corrupt_paths"][:20]))
 
-        st.markdown('<div class="section-header"><span class="step-badge">STEP 1</span> Semi-supervised labeling</div>', unsafe_allow_html=True)
+        st.markdown('<div class="section-header"><span class="step-badge">STEP 1</span> Extract embeddings</div>', unsafe_allow_html=True)
+        st.caption(
+            "An embedding is a numeric fingerprint of an image, a list of a few hundred numbers that captures what's "
+            "visually in the image, produced by a pretrained vision model. Two similar-looking images get similar "
+            "fingerprints. Everything after this step (label propagation, duplicates, outliers, clusters, influence) "
+            "is computed by comparing these fingerprints instead of comparing raw pixels, which is both faster and "
+            "more meaningful."
+        )
+
+        img_paths_all = [
+            r["path"] for r in records
+            if os.path.isfile(r["path"]) and r["path"].lower().endswith((".jpg", ".jpeg", ".png", ".bmp"))
+        ]
+
+        if st.button("Extract embeddings (ResNet-18)"):
+            from data_utils.embedding_cache import get_or_extract_embeddings
+            progress_bar = st.progress(0, text="Starting...")
+
+            def _update_progress(done, total):
+                progress_bar.progress(done / total, text=f"Extracted embeddings for {done:,} / {total:,} images")
+
+            def _extract(paths):
+                extractor = EmbeddingExtractor(backbone="resnet18")
+                embs, _ = extractor.extract_embeddings(paths, progress_callback=_update_progress)
+                extractor.save_embeddings(embs, paths, output_dir=OUTPUTS_DIR)
+                return embs
+
+            try:
+                embeddings, was_cached = get_or_extract_embeddings(img_paths_all, "resnet18", _extract)
+                progress_bar.empty()
+                if was_cached:
+                    st.info("Reusing embeddings already computed for this exact dataset — no need to run the model again.")
+
+                id_to_label = {r["path"]: r.get("label") for r in records}
+                labels_arr = np.array([str(id_to_label.get(p, "unknown")) for p in img_paths_all])
+                np.save(os.path.join(OUTPUTS_DIR, "labels.npy"), labels_arr)
+                pd.DataFrame({"path": img_paths_all, "label": labels_arr}).to_csv(
+                    os.path.join(OUTPUTS_DIR, "labels.csv"), index=False)
+
+                st.session_state["embeddings"] = embeddings
+                st.session_state["ids"]        = img_paths_all
+                st.session_state["labels"]     = labels_arr
+                st.session_state["step2_backbone"] = "resnet18"
+                st.success(f"Extracted **{embeddings.shape[0]}** embeddings ({embeddings.shape[1]} dims). Saved to `{OUTPUTS_DIR}/`.")
+            except Exception as e:
+                st.error(f"Embedding extraction failed: {e}")
+
+        if "embeddings" in st.session_state:
+            st.caption(f"✓ {len(st.session_state['ids'])} embeddings ready ({st.session_state['embeddings'].shape[1]} dims).")
+
+        st.markdown('<div class="section-header"><span class="step-badge">STEP 2</span> Semi-supervised labeling</div>', unsafe_allow_html=True)
 
         if n_unlab == 0:
             st.info("All samples already labeled, skipping label propagation.")
             final_records = records
+        elif "embeddings" not in st.session_state:
+            st.warning("Run Step 1 (Extract embeddings) first — label propagation needs embeddings to compare images against each other.")
+            final_records = records
         else:
             st.write(f"Detected **{n_unlab}** unlabeled samples out of {n}.")
-            col_a, col_b, col_c = st.columns(3)
-            backbone_choice = col_a.selectbox("Backbone", ["resnet18", "clip"])
-            k_neighbors     = col_b.slider("Neighbors (k)", 1, 10, 5)
-            conf_threshold  = col_c.slider("Confidence threshold", 0.0, 1.0, 0.7, 0.05)
+            col_b, col_c = st.columns(2)
+            k_neighbors    = col_b.slider("Neighbors (k)", 1, 10, 5)
+            conf_threshold = col_c.slider("Confidence threshold", 0.0, 1.0, 0.7, 0.05)
 
             if st.button("Run label propagation"):
-                image_paths    = [r["path"] for r in records if os.path.isfile(r["path"])]
-                partial_labels = [r.get("label") for r in records]
-
-                cached = st.session_state.get("step1_embedding_cache")
-                cached_backbone = st.session_state.get("step1_backbone")
-                have_fast_path = (
-                    cached is not None and cached_backbone == backbone_choice
-                    and all(p in cached for p in image_paths)
-                )
+                from data_utils.labelling import relabel_from_embeddings
+                embeddings = st.session_state["embeddings"]
+                ids        = st.session_state["ids"]
+                id_to_current_label = {r["path"]: r.get("label") for r in records}
+                partial_labels = [id_to_current_label.get(p) for p in ids]
 
                 try:
-                    if have_fast_path:
-                        from data_utils.labelling import relabel_from_embeddings
-                        step1_embeddings = np.stack([cached[p] for p in image_paths])
-                        results_df = relabel_from_embeddings(
-                            image_paths, partial_labels, step1_embeddings,
-                            k=k_neighbors, conf_threshold=conf_threshold,
-                        )
-                        device_used = "cached — no re-extraction needed"
-                    else:
-                        progress_bar = st.progress(0, text="Starting...")
-
-                        def _update_progress(done, total):
-                            progress_bar.progress(done / total, text=f"Extracted embeddings for {done:,} / {total:,} images")
-
-                        results_df, step1_embeddings, device_used = semi_supervised_labeling(
-                            image_paths, partial_labels,
-                            backbone=backbone_choice, k=k_neighbors,
-                            conf_threshold=conf_threshold,
-                            progress_callback=_update_progress,
-                        )
-                        progress_bar.empty()
-
-                    st.caption(f"Ran on: **{device_used}**" + (" (no GPU detected on this machine, so this ran on CPU)" if device_used == "cpu" else ""))
+                    results_df = relabel_from_embeddings(
+                        ids, partial_labels, embeddings,
+                        k=k_neighbors, conf_threshold=conf_threshold,
+                    )
                     st.success("Label propagation complete.")
                     st.dataframe(results_df.head(10), use_container_width=True)
                     csv_bytes = results_df.to_csv(index=False).encode("utf-8")
@@ -267,66 +296,13 @@ if mode == "Upload & Label":
                     for r in records:
                         if r.get("label") is None:
                             r["label"] = label_map.get(r["path"])
-                    # Cache these so Step 2 doesn't recompute embeddings for the
-                    # same images from scratch. That was doubling total wait
-                    # time on large datasets.
-                    st.session_state["step1_embedding_cache"] = dict(zip(image_paths, step1_embeddings))
-                    st.session_state["step1_backbone"] = backbone_choice
+                    st.session_state["labels"] = np.array(
+                        [str(id_to_current_label.get(p) or label_map.get(p) or "unknown") for p in ids]
+                    )
                 except Exception as e:
                     st.error(f"Label propagation failed: {e}")
             final_records = records
 
-        st.markdown('<div class="section-header"><span class="step-badge">STEP 2</span> Extract & save embeddings</div>', unsafe_allow_html=True)
-        st.caption(
-            "An embedding is a numeric fingerprint of an image, a list of a few hundred numbers that captures what's "
-            "visually *in* the image, produced by a pretrained vision model. Two similar-looking images get similar "
-            "fingerprints. Everything in the next step (duplicates, outliers, clusters, influence) is computed by "
-            "comparing these fingerprints instead of comparing raw pixels, which is both faster and more meaningful."
-        )
-        emb_backbone = st.selectbox("Backbone for embeddings", ["resnet18", "clip"], key="emb_bb")
-
-        if st.button("Extract embeddings"):
-            img_paths_all = [
-                r["path"] for r in final_records
-                if os.path.isfile(r["path"]) and r["path"].lower().endswith((".jpg",".jpeg",".png",".bmp"))
-            ]
-            cache = st.session_state.get("step1_embedding_cache")
-            cache_backbone = st.session_state.get("step1_backbone")
-            reusable = (
-                cache is not None
-                and cache_backbone == emb_backbone
-                and all(p in cache for p in img_paths_all)
-            )
-            try:
-                if reusable:
-                    st.info("Reusing the embeddings already computed in Step 1, no need to run the model again.")
-                    embeddings = np.stack([cache[p] for p in img_paths_all])
-                    ids = img_paths_all
-                else:
-                    progress_bar = st.progress(0, text="Starting...")
-
-                    def _update_progress(done, total):
-                        progress_bar.progress(done / total, text=f"Extracted embeddings for {done:,} / {total:,} images")
-
-                    extractor  = EmbeddingExtractor(backbone=emb_backbone)
-                    embeddings, ids = extractor.extract_embeddings(img_paths_all, progress_callback=_update_progress)
-                    extractor.save_embeddings(embeddings, ids, output_dir=OUTPUTS_DIR)
-                    progress_bar.empty()
-                    st.caption(f"Ran on device: **{extractor.device}**" + (" (no GPU detected on this machine, so this ran on CPU)" if extractor.device == "cpu" else ""))
-
-                id_to_label = {r["path"]: str(r.get("label", "unknown")) for r in final_records}
-                labels_arr  = np.array([id_to_label.get(i, "unknown") for i in ids])
-                np.save(os.path.join(OUTPUTS_DIR, "labels.npy"), labels_arr)
-                pd.DataFrame({"path": ids, "label": labels_arr}).to_csv(
-                    os.path.join(OUTPUTS_DIR, "labels.csv"), index=False)
-
-                # Bug B1/B2 fix: persist to session state
-                st.session_state["embeddings"] = embeddings
-                st.session_state["labels"]     = labels_arr
-                st.session_state["ids"]        = ids
-                st.success(f"Extracted **{embeddings.shape[0]}** embeddings ({embeddings.shape[1]} dims). Saved to `{OUTPUTS_DIR}/`.")
-            except Exception as e:
-                st.error(f"Embedding extraction failed: {e}")
         st.caption(f"Uploaded images are kept at `{tmp_dir}` for the rest of this session so later steps (like the robustness/quality analysis) can still read them.")
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -364,7 +340,6 @@ elif mode == "Run Diagnostics":
         else:
             st.warning("No saved embeddings found. Upload a dataset ZIP to extract embeddings now.")
             up = st.file_uploader("Dataset ZIP", type=["zip"])
-            bb = st.selectbox("Backbone", ["resnet18", "clip"])
             if up and st.button("Extract embeddings"):
                 tmp2 = tempfile.mkdtemp()
                 zp   = os.path.join(tmp2, up.name)
@@ -378,7 +353,7 @@ elif mode == "Run Diagnostics":
                         if fn.lower().endswith((".jpg",".jpeg",".png",".bmp")):
                             img_paths2.append(os.path.join(root, fn))
                 with st.spinner("Extracting..."):
-                    ext2 = EmbeddingExtractor(backbone=bb)
+                    ext2 = EmbeddingExtractor(backbone="resnet18")
                     embeddings, ids = ext2.extract_embeddings(img_paths2)
                     ext2.save_embeddings(embeddings, ids, output_dir=OUTPUTS_DIR)
                     labels = np.array(["unknown"] * len(ids))
