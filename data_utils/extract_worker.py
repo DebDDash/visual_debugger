@@ -28,8 +28,6 @@ import platform
 
 if platform.system() == "Darwin":
     os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
-    os.environ.setdefault("OMP_NUM_THREADS", "1")
-    os.environ.setdefault("MKL_NUM_THREADS", "1")
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
@@ -47,10 +45,6 @@ def main():
         image_paths = [line.strip() for line in f if line.strip()]
 
     import numpy as np
-    import torch
-    if platform.system() == "Darwin":
-        torch.set_num_threads(1)
-
     from embedding.extract import EmbeddingExtractor
 
     extractor = EmbeddingExtractor(backbone=backbone)
