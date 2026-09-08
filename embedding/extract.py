@@ -1,5 +1,6 @@
 """
-Extracts embeddings from images using pretrained backbones (ResNet18 or CLIP) for later use in bias analysis, duplicate detection, and labeling.
+Extracts embeddings from images using a pretrained ResNet-18 backbone for
+later use in bias analysis, duplicate detection, and labeling.
 """
 
 import os
@@ -27,8 +28,8 @@ class EmbeddingExtractor:
         self.model.to(self.device).eval()
 
     def _load_model(self, backbone):
-        """Loads the desired pretrained model and preprocessing pipeline."""
-        if backbone == "resnet18":
+        """Loads the pretrained ResNet-18 model and its preprocessing pipeline."""
+        if backbone.lower() == "resnet18":
             model = models.resnet18(weights=models.ResNet18_Weights.IMAGENET1K_V1)
             model = torch.nn.Sequential(*(list(model.children())[:-1]))  # remove final classifier
             transform = transforms.Compose([
@@ -36,14 +37,8 @@ class EmbeddingExtractor:
                 transforms.ToTensor(),
                 transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
             ])
-        elif backbone == "clip":
-            import open_clip
-            model, _, preprocess = open_clip.create_model_and_transforms(
-                "ViT-B-32", pretrained="laion2b_s34b_b79k"
-            )
-            transform = preprocess
         else:
-            raise ValueError(f"Unsupported backbone: {backbone}")
+            raise ValueError(f"Unsupported backbone: {backbone!r}. Only 'resnet18' is supported.")
         return model, transform
 
     @torch.no_grad()
