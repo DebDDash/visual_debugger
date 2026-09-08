@@ -226,20 +226,38 @@ if mode == "Upload & Label":
             if st.button("Run label propagation"):
                 image_paths    = [r["path"] for r in records if os.path.isfile(r["path"])]
                 partial_labels = [r.get("label") for r in records]
-                progress_bar = st.progress(0, text="Starting...")
 
-                def _update_progress(done, total):
-                    progress_bar.progress(done / total, text=f"Extracted embeddings for {done:,} / {total:,} images")
+                cached = st.session_state.get("step1_embedding_cache")
+                cached_backbone = st.session_state.get("step1_backbone")
+                have_fast_path = (
+                    cached is not None and cached_backbone == backbone_choice
+                    and all(p in cached for p in image_paths)
+                )
 
                 try:
-                    results_df, step1_embeddings, device_used = semi_supervised_labeling(
-                        image_paths, partial_labels,
-                        backbone=backbone_choice, k=k_neighbors,
-                        conf_threshold=conf_threshold,
-                        progress_callback=_update_progress,
-                    )
-                    progress_bar.empty()
-                    st.caption(f"Ran on device: **{device_used}**" + (" (no GPU detected on this machine, so this ran on CPU)" if device_used == "cpu" else ""))
+                    if have_fast_path:
+                        from data_utils.labelling import relabel_from_embeddings
+                        step1_embeddings = np.stack([cached[p] for p in image_paths])
+                        results_df = relabel_from_embeddings(
+                            image_paths, partial_labels, step1_embeddings,
+                            k=k_neighbors, conf_threshold=conf_threshold,
+                        )
+                        device_used = "cached — no re-extraction needed"
+                    else:
+                        progress_bar = st.progress(0, text="Starting...")
+
+                        def _update_progress(done, total):
+                            progress_bar.progress(done / total, text=f"Extracted embeddings for {done:,} / {total:,} images")
+
+                        results_df, step1_embeddings, device_used = semi_supervised_labeling(
+                            image_paths, partial_labels,
+                            backbone=backbone_choice, k=k_neighbors,
+                            conf_threshold=conf_threshold,
+                            progress_callback=_update_progress,
+                        )
+                        progress_bar.empty()
+
+                    st.caption(f"Ran on: **{device_used}**" + (" (no GPU detected on this machine, so this ran on CPU)" if device_used == "cpu" else ""))
                     st.success("Label propagation complete.")
                     st.dataframe(results_df.head(10), use_container_width=True)
                     csv_bytes = results_df.to_csv(index=False).encode("utf-8")
