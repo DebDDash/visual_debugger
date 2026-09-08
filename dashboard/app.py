@@ -11,11 +11,8 @@ import platform
 # libomp), not a general problem — Linux and Windows builds don't hit it
 # the same way, so we only pay the (real) cost of single-threaded CPU ops
 # on macOS, and leave full multi-threading available everywhere else.
-
 if platform.system() == "Darwin":
     os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
-    os.environ.setdefault("OMP_NUM_THREADS", "1")
-    os.environ.setdefault("MKL_NUM_THREADS", "1")
 
 import sys
 import glob
@@ -31,8 +28,6 @@ from PIL import Image
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 import torch
-if platform.system() == "Darwin":
-    torch.set_num_threads(1)
 
 from data_utils.loader import load_dataset, bulk_extract_metadata, summarize_dataset
 from data_utils import visualize as viz
