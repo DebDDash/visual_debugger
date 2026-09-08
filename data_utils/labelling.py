@@ -168,19 +168,34 @@ def filter_pseudo_labels(pred_labels, confidences, threshold=0.7):
 
 
 def semi_supervised_labeling(image_paths, partial_labels, backbone="resnet18", k=5, conf_threshold=0.7,
-                             use_faiss=True, batch_size=32, progress_callback=None):
+                             use_faiss=True, batch_size=32, progress_callback=None,
+                             use_disk_cache=True, cache_dir=None):
     """
     Full pipeline. Returns (results_df, embeddings, device_used).
     - partial_labels: list-like where unlabeled entries are None or np.nan
     - progress_callback: optional callable(done, total), forwarded to extract_embeddings
+    - use_disk_cache: if True, reuse a persistent on-disk embedding cache keyed by
+      (dataset content, backbone) so re-running with different k/conf_threshold,
+      or restarting the app entirely, never re-extracts embeddings unnecessarily.
     """
+    from data_utils.embedding_cache import get_or_extract_embeddings, DEFAULT_CACHE_DIR
+    cache_dir = cache_dir or DEFAULT_CACHE_DIR
+
     model, preprocess = get_pretrained_model(backbone, device=None)  # auto-detect CUDA/MPS
     device = next(model.parameters()).device.type
     use_clip = (backbone.lower() == "clip")
 
-    embeddings = extract_embeddings(image_paths, model, preprocess, device=device,
-                                    use_clip=use_clip, batch_size=batch_size,
-                                    progress_callback=progress_callback)
+    def _extract(paths):
+        return extract_embeddings(paths, model, preprocess, device=device,
+                                  use_clip=use_clip, batch_size=batch_size,
+                                  progress_callback=progress_callback)
+
+    if use_disk_cache:
+        embeddings, was_cached = get_or_extract_embeddings(image_paths, backbone, _extract, cache_dir=cache_dir)
+        if was_cached and progress_callback is not None:
+            progress_callback(len(image_paths), len(image_paths))  # jump progress bar to done
+    else:
+        embeddings = _extract(image_paths)
 
     if embeddings.size == 0:
         results = pd.DataFrame({
@@ -192,9 +207,19 @@ def semi_supervised_labeling(image_paths, partial_labels, backbone="resnet18", k
         })
         return results, embeddings, device
 
+    results = relabel_from_embeddings(image_paths, partial_labels, embeddings, k=k, conf_threshold=conf_threshold, use_faiss=use_faiss)
+    return results, embeddings, device
+
+
+def relabel_from_embeddings(image_paths, partial_labels, embeddings, k=5, conf_threshold=0.7, use_faiss=True):
+    """
+    Re-run just the propagation + filtering step against ALREADY-EXTRACTED
+    embeddings. Use this when a user is only retuning k or the confidence
+    threshold — it's near-instant since it skips the CNN forward pass
+    entirely. Call this instead of semi_supervised_labeling() for that case.
+    """
     pred_labels, confidences = propagate_labels(embeddings, partial_labels, k=k, use_faiss=use_faiss)
-    # pred_labels only for unlabeled entries — we need arrays aligned with input length
-    # Build full-length arrays
+
     labels = np.array(partial_labels, dtype=object)
     unlabeled_mask = ~pd.notnull(labels)
     full_pred = labels.copy()
@@ -204,12 +229,10 @@ def semi_supervised_labeling(image_paths, partial_labels, backbone="resnet18", k
 
     filtered = filter_pseudo_labels(full_pred, full_conf, threshold=conf_threshold)
 
-    results = pd.DataFrame({
+    return pd.DataFrame({
         "image_path": image_paths,
         "original_label": partial_labels,
         "pred_label": full_pred.tolist(),
         "final_label": filtered,
         "confidence": full_conf.tolist()
     })
-
-    return results, embeddings, device
