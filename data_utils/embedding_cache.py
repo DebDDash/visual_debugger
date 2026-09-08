@@ -3,7 +3,7 @@ embedding_cache.py
 -------------------
 Persistent, content-addressed cache for extracted image embeddings.
 
-Extraction (running every image through a CNN/CLIP forward pass) is the
+Extraction (running every image through a CNN forward pass) is the
 expensive step in semi-supervised labeling — k-NN propagation over the
 resulting vectors is cheap by comparison. Without a cache, re-tuning `k` or
 the confidence threshold, or simply restarting the app, forces a full
