@@ -60,7 +60,7 @@ class EmbeddingExtractor:
                 print(f"[WARN] Failed to load {path}: {e}")
                 return path, None
 
-        with ThreadPoolExecutor(max_workers=min(4, os.cpu_count() or 2)) as pool:
+        with ThreadPoolExecutor(max_workers=min(8, os.cpu_count() or 4)) as pool:
             for i in tqdm(range(0, total, batch_size), desc="Extracting embeddings"):
                 batch_paths = image_paths[i:i + batch_size]
                 loaded = list(pool.map(_load_one, batch_paths))
