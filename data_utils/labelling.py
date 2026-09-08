@@ -21,10 +21,9 @@ except Exception:
 
 def get_pretrained_model(backbone="resnet18", device=None):
     """
-    Load pretrained model (ResNet18 or CLIP) for feature extraction.
+    Load pretrained ResNet-18 model for feature extraction.
     Auto-detects CUDA/MPS if available, falling back to CPU only when
-    neither exists — this used to be hardcoded to CPU, which made Step 1
-    dramatically slower than Step 2's extraction on any machine with a GPU.
+    neither exists.
     """
     if device is None:
         if torch.cuda.is_available():
@@ -50,17 +49,12 @@ def get_pretrained_model(backbone="resnet18", device=None):
         ])
         return model.to(device).eval(), preprocess
 
-    elif backbone.lower() == "clip":
-        import clip
-        model, preprocess = clip.load("ViT-B/32", device=device)
-        return model, preprocess
-
     else:
-        raise ValueError("Unsupported backbone. Use 'resnet18' or 'clip'.")
+        raise ValueError(f"Unsupported backbone: {backbone!r}. Only 'resnet18' is supported.")
 
 
 @torch.no_grad()
-def extract_embeddings(image_paths, model, preprocess, device="cpu", use_clip=False, batch_size=32, progress_callback=None):
+def extract_embeddings(image_paths, model, preprocess, device="cpu", batch_size=32, progress_callback=None):
     """
     Extract embeddings for a list of image paths. Returns (N x D) numpy array.
 
@@ -93,10 +87,7 @@ def extract_embeddings(image_paths, model, preprocess, device="cpu", use_clip=Fa
 
             if batch_imgs:
                 batch = torch.stack(batch_imgs).to(device)
-                if use_clip:
-                    features = model.encode_image(batch)
-                else:
-                    features = model(batch)
+                features = model(batch)
                 features = torch.nn.functional.normalize(features, dim=1)
                 all_embeds.append(features.cpu().numpy())
 
@@ -183,11 +174,10 @@ def semi_supervised_labeling(image_paths, partial_labels, backbone="resnet18", k
 
     model, preprocess = get_pretrained_model(backbone, device=None)  # auto-detect CUDA/MPS
     device = next(model.parameters()).device.type
-    use_clip = (backbone.lower() == "clip")
 
     def _extract(paths):
         return extract_embeddings(paths, model, preprocess, device=device,
-                                  use_clip=use_clip, batch_size=batch_size,
+                                  batch_size=batch_size,
                                   progress_callback=progress_callback)
 
     if use_disk_cache:
