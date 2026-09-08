@@ -79,7 +79,7 @@ def extract_embeddings(image_paths, model, preprocess, device="cpu", batch_size=
         except Exception:
             return None
 
-    with ThreadPoolExecutor(max_workers=min(8, os.cpu_count() or 4)) as pool:
+    with ThreadPoolExecutor(max_workers=min(4, os.cpu_count() or 2)) as pool:
         for i in tqdm(range(0, total, batch_size), desc="Extracting embeddings", leave=False):
             batch_paths = image_paths[i:i + batch_size]
             loaded = list(pool.map(_load_one, batch_paths))
