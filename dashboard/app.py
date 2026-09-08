@@ -1,4 +1,22 @@
 import os
+import platform
+
+# --- MUST run before torch/faiss/numpy/opencv are imported anywhere ---
+# On macOS specifically, torch, faiss-cpu, and OpenCV each bundle their own
+# copy of the OpenMP threading runtime (libomp). Loading more than one copy
+# into the same process is a documented cause of a silent segfault (not a
+# Python exception — the whole process dies) right as a heavy compute step
+# finishes and threads start tearing down. This is a macOS-specific
+# library-loading quirk (mainly seen with Homebrew/conda-distributed
+# libomp), not a general problem — Linux and Windows builds don't hit it
+# the same way, so we only pay the (real) cost of single-threaded CPU ops
+# on macOS, and leave full multi-threading available everywhere else.
+
+if platform.system() == "Darwin":
+    os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
+    os.environ.setdefault("OMP_NUM_THREADS", "1")
+    os.environ.setdefault("MKL_NUM_THREADS", "1")
+
 import sys
 import glob
 import shutil
@@ -12,10 +30,15 @@ from PIL import Image
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
+import torch
+if platform.system() == "Darwin":
+    torch.set_num_threads(1)
+
 from data_utils.loader import load_dataset, bulk_extract_metadata, summarize_dataset
 from data_utils import visualize as viz
 import embedding.visualize as embviz
 from data_utils.labelling import semi_supervised_labeling
+from data_utils.clustering import cluster_embeddings, build_pseudo_label_df
 from embedding.extract import EmbeddingExtractor
 from embedding.indexer import build_faiss_index_auto, find_duplicates_faiss_fast
 from embedding.visualize import reduce_embeddings, plot_embedding_scatter, plot_similarity_heatmap
@@ -77,6 +100,38 @@ with st.sidebar:
 
 mode = mode.split("  ")[-1]
 
+def _render_label_review_gallery(records_subset, key_prefix, max_per_label=8):
+    """
+    Show a grid of images grouped by their (possibly just-assigned) label so
+    the person can visually spot-check what got labeled, and fix any wrong
+    ones on the spot. Used after both label propagation and clustering,
+    since both produce labels that haven't been human-verified yet.
+    """
+    from collections import defaultdict
+    by_label = defaultdict(list)
+    for r in records_subset:
+        by_label[str(r.get("label", "unknown"))].append(r["path"])
+
+    st.caption(f"Grouped by label — {len(by_label)} group(s), {sum(len(v) for v in by_label.values())} images. "
+              "Spot-check a few from each group; wrong ones stand out visually fast.")
+
+    all_labels = sorted(by_label.keys())
+    chosen_labels = st.multiselect("Show labels", all_labels, default=all_labels[:6], key=f"{key_prefix}_label_filter")
+
+    for lbl in chosen_labels:
+        paths = by_label[lbl]
+        st.markdown(f"**{lbl}** ({len(paths)} images)")
+        show_paths = paths[:max_per_label]
+        cols = st.columns(min(8, len(show_paths)))
+        for i, p in enumerate(show_paths):
+            try:
+                cols[i % len(cols)].image(Image.open(p), use_container_width=True)
+            except Exception:
+                pass
+        if len(paths) > max_per_label:
+            st.caption(f"...and {len(paths) - max_per_label} more in this group.")
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 # MODE 1: Upload & Label
 # ══════════════════════════════════════════════════════════════════════════════
@@ -84,29 +139,41 @@ if mode == "Upload & Label":
     st.markdown("# Upload & Label Dataset")
     st.markdown("Please upload your image dataset below so it can be examined and analyzed for duplicates, imbalance, and quality issues.")
 
-    st.markdown('<div class="section-header">Is your dataset supervised or unlabeled?</div>', unsafe_allow_html=True)
+    st.markdown('<div class="section-header">What best describes your dataset?</div>', unsafe_allow_html=True)
     dataset_kind = st.radio(
         "Dataset type",
-        ["Supervised: all images are labeled", "Unlabeled: some or all labels are missing"],
+        ["Labeled: every image already belongs to a known class",
+         "Semi-labeled: some images are labeled, some aren't",
+         "Unlabeled: none of the images are labeled yet"],
         label_visibility="collapsed",
         help="This just decides what upload instructions to show you; the tool detects the actual folder structure automatically either way.",
     )
 
-    if dataset_kind.startswith("Supervised"):
+    if dataset_kind.startswith("Labeled"):
         st.info(
-            "**Supervised** means every image already belongs to a known class, e.g. you know which photos are cats vs. dogs.\n\n"
+            "**Labeled** means every image already belongs to a known class, e.g. you know which photos are cats vs. dogs.\n\n"
             "**How to upload:** zip your images into one subfolder per class: for example, `dataset.zip` containing `cats/`, `dogs/`, "
-            "`birds/`. Once embeddings are extracted below, you can go straight to Run Diagnostics."
+            "`birds/`. Once embeddings are extracted below, you can go straight to Run Diagnostics — duplicates, outliers, and "
+            "clusters are all visible there regardless of labeling."
+        )
+    elif dataset_kind.startswith("Semi-labeled"):
+        st.info(
+            "**Semi-labeled** means some of your images are already sorted into class folders and some aren't.\n\n"
+            "**How to upload:** zip your sorted images into class subfolders (`cats/`, `dogs/`, ...) and leave the rest loose in "
+            "the same zip (or in a folder named `unlabeled/`). Step 2 below will guess labels for the unlabeled ones by "
+            "comparing them to the ones you've already sorted.\n\n"
+            "You can still visually browse every image below (Image preview) and check for duplicates/outliers regardless of "
+            "whether labeling has run yet."
         )
     else:
         st.info(
-            "**Unlabeled** covers both \"none of my images are sorted\" and \"some are sorted, some aren't.\"\n\n"
-            "**How to upload:** zip your sorted images into class subfolders (`cats/`, `dogs/`, ...) if you have any, and leave the rest "
-            "loose in the same zip (or in a folder named `unlabeled/`). If you have at least a handful of labeled examples per class, "
-            "Step 1 below can guess labels for the rest by comparing images to the ones you've already sorted.\n\n"
-            "**If you have zero labels at all:** this tool can't invent labels from nothing. Step 1 needs some labeled examples to "
-            "learn from. With zero labels, just skip Step 1; you can still run duplicate detection, outlier detection, and embedding "
-            "visualization in the Diagnostics step, since none of those need labels."
+            "**Unlabeled** means none of your images are sorted into classes yet.\n\n"
+            "**How to upload:** just zip up all the images, no folder structure needed.\n\n"
+            "k-NN label propagation can't invent labels from nothing — it needs some labeled examples to learn from. But if you "
+            "know roughly how many classes exist, Step 2 below can instead group visually similar images together automatically "
+            "(unsupervised clustering), which you can then review and name.\n\n"
+            "Everything visual — the image gallery, duplicate detection, outlier detection, embedding visualization — works "
+            "the same way here as it does for a fully labeled dataset, since none of those actually need labels."
         )
 
     uploaded_zip = st.file_uploader("Dataset ZIP", type=["zip"], label_visibility="collapsed",
@@ -226,32 +293,32 @@ if mode == "Upload & Label":
         ]
 
         if st.button("Extract embeddings (ResNet-18)"):
-            from data_utils.embedding_cache import get_or_extract_embeddings
+            from data_utils.embedding_cache import extract_embeddings_isolated
             progress_bar = st.progress(0, text="Starting...")
 
             def _update_progress(done, total):
                 progress_bar.progress(done / total, text=f"Extracted embeddings for {done:,} / {total:,} images")
 
-            def _extract(paths):
-                extractor = EmbeddingExtractor(backbone="resnet18")
-                embs, _ = extractor.extract_embeddings(paths, progress_callback=_update_progress)
-                extractor.save_embeddings(embs, paths, output_dir=OUTPUTS_DIR)
-                return embs
-
             try:
-                embeddings, was_cached = get_or_extract_embeddings(img_paths_all, "resnet18", _extract)
+                embeddings, ids_out, was_cached = extract_embeddings_isolated(
+                    img_paths_all, backbone="resnet18", progress_callback=_update_progress
+                )
                 progress_bar.empty()
                 if was_cached:
                     st.info("Reusing embeddings already computed for this exact dataset — no need to run the model again.")
 
+                np.save(os.path.join(OUTPUTS_DIR, "embeddings_resnet18.npy"), embeddings)
+                with open(os.path.join(OUTPUTS_DIR, "image_ids.txt"), "w") as f:
+                    f.write("\n".join(ids_out))
+
                 id_to_label = {r["path"]: r.get("label") for r in records}
-                labels_arr = np.array([str(id_to_label.get(p, "unknown")) for p in img_paths_all])
+                labels_arr = np.array([str(id_to_label.get(p, "unknown")) for p in ids_out])
                 np.save(os.path.join(OUTPUTS_DIR, "labels.npy"), labels_arr)
-                pd.DataFrame({"path": img_paths_all, "label": labels_arr}).to_csv(
+                pd.DataFrame({"path": ids_out, "label": labels_arr}).to_csv(
                     os.path.join(OUTPUTS_DIR, "labels.csv"), index=False)
 
                 st.session_state["embeddings"] = embeddings
-                st.session_state["ids"]        = img_paths_all
+                st.session_state["ids"]        = ids_out
                 st.session_state["labels"]     = labels_arr
                 st.session_state["step2_backbone"] = "resnet18"
                 st.success(f"Extracted **{embeddings.shape[0]}** embeddings ({embeddings.shape[1]} dims). Saved to `{OUTPUTS_DIR}/`.")
@@ -268,6 +335,64 @@ if mode == "Upload & Label":
             final_records = records
         elif "embeddings" not in st.session_state:
             st.warning("Run Step 1 (Extract embeddings) first — label propagation needs embeddings to compare images against each other.")
+            final_records = records
+        elif n_lab == 0:
+            # Zero real labels: nothing for k-NN propagation to propagate
+            # FROM. Offer unsupervised clustering instead of just giving up —
+            # the user often still knows roughly how many classes exist even
+            # with nothing labeled yet.
+            st.warning(
+                "No labeled examples at all, so there's nothing for similarity-based label propagation to learn "
+                "from. But if you know roughly how many classes your images fall into, we can group visually "
+                "similar images together automatically — you can then review and name each group."
+            )
+            n_expected = st.number_input("How many classes do you expect?", min_value=2,
+                                         max_value=max(2, len(records) - 1), value=2, step=1)
+            if st.button("Cluster into groups (unsupervised)"):
+                embeddings = st.session_state["embeddings"]
+                ids = st.session_state["ids"]
+                try:
+                    result = cluster_embeddings(embeddings, n_clusters=int(n_expected))
+                    df = build_pseudo_label_df(ids, result["cluster_ids"])
+                    st.session_state["cluster_result_df"] = df
+
+                    sil = result["silhouette"]
+                    if sil is not None:
+                        quality = "well-separated" if sil > 0.5 else ("weakly separated" if sil > 0.2 else "poorly separated — the number of classes you picked may not match the data's real structure")
+                        st.caption(f"Silhouette score: **{sil:.2f}** ({quality}).")
+                    st.write("Cluster sizes:", result["cluster_sizes"])
+                except Exception as e:
+                    st.error(f"Clustering failed: {e}")
+
+            if "cluster_result_df" in st.session_state:
+                st.markdown("**Review and name each cluster** (these are groupings by visual similarity, not verified labels — inspect a few images per cluster before trusting them):")
+                df = st.session_state["cluster_result_df"]
+                cluster_names = {}
+                for cid in sorted(df["cluster_id"].unique()):
+                    sample_paths = df[df["cluster_id"] == cid]["image_path"].head(5).tolist()
+                    cols = st.columns([1, 3, 6])
+                    cols[0].write(f"Cluster {cid}")
+                    cluster_names[cid] = cols[1].text_input("Name", value=f"cluster_{cid}", key=f"cname_{cid}", label_visibility="collapsed")
+                    with cols[2]:
+                        thumb_cols = st.columns(5)
+                        for i, p in enumerate(sample_paths):
+                            try:
+                                thumb_cols[i].image(Image.open(p), use_container_width=True)
+                            except Exception:
+                                pass
+
+                if st.button("Apply cluster names as labels"):
+                    named_df = build_pseudo_label_df(df["image_path"].tolist(), df["cluster_id"].values, cluster_names)
+                    label_map = dict(zip(named_df["image_path"], named_df["pseudo_label"]))
+                    for r in records:
+                        r["label"] = label_map.get(r["path"], r.get("label"))
+                    st.success("Applied cluster names as labels. These are still unverified pseudo-labels — spot-check before relying on them for training.")
+                    csv_bytes = named_df.to_csv(index=False).encode("utf-8")
+                    st.download_button("Download cluster assignments CSV", data=csv_bytes,
+                                       file_name="cluster_pseudo_labels.csv", mime="text/csv")
+
+                    st.markdown("**Review the assigned labels**")
+                    _render_label_review_gallery(records, key_prefix="cluster_review")
             final_records = records
         else:
             st.write(f"Detected **{n_unlab}** unlabeled samples out of {n}.")
@@ -299,6 +424,9 @@ if mode == "Upload & Label":
                     st.session_state["labels"] = np.array(
                         [str(id_to_current_label.get(p) or label_map.get(p) or "unknown") for p in ids]
                     )
+
+                    st.markdown("**Review the assigned labels**")
+                    _render_label_review_gallery(records, key_prefix="propagation_review")
                 except Exception as e:
                     st.error(f"Label propagation failed: {e}")
             final_records = records
