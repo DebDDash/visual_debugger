@@ -65,6 +65,95 @@ def save_cached_embeddings(image_paths, backbone, embeddings, cache_dir=DEFAULT_
     return path
 
 
+def start_extraction_job(image_paths, backbone="resnet18", cache_dir=DEFAULT_CACHE_DIR):
+    """
+    Launches extraction in a background subprocess WITHOUT waiting for it —
+    returns immediately with a job handle. Use poll_extraction_job() on
+    every Streamlit rerun to check status instead of blocking on it.
+
+    Blocking the whole Streamlit script for the 20-30+ minutes a large
+    extraction takes freezes the entire app, including its own connection
+    heartbeat — the browser eventually times out and can't cleanly
+    reconnect ("Bad message format: SessionInfo..."). Polling briefly on
+    each rerun instead keeps the app responsive throughout.
+    """
+    import subprocess
+    import sys
+    import tempfile
+
+    os.makedirs(cache_dir, exist_ok=True)
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False, encoding="utf-8") as f:
+        f.write("\n".join(image_paths))
+        paths_file = f.name
+
+    output_npz = os.path.join(cache_dir, f"_worker_output_{os.getpid()}.npz")
+    progress_path = output_npz + ".progress"
+    worker_script = os.path.join(os.path.dirname(__file__), "extract_worker.py")
+
+    proc = subprocess.Popen(
+        [sys.executable, worker_script, paths_file, output_npz, backbone],
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+    )
+
+    return {
+        "proc": proc,
+        "paths_file": paths_file,
+        "output_npz": output_npz,
+        "progress_path": progress_path,
+        "image_paths": list(image_paths),
+        "backbone": backbone,
+        "cache_dir": cache_dir,
+    }
+
+
+def poll_extraction_job(job):
+    """
+    Call this on every Streamlit rerun. Never blocks/sleeps — just checks
+    current status immediately and returns.
+
+    Returns one of:
+        ("running", (done, total) or None)
+        ("done", (embeddings, ids))
+        ("error", error_message)
+    """
+    proc = job["proc"]
+    ret = proc.poll()
+
+    if ret is None:
+        progress = None
+        if os.path.exists(job["progress_path"]):
+            try:
+                with open(job["progress_path"]) as pf:
+                    done, total = map(int, pf.read().strip().split("/"))
+                progress = (done, total)
+            except (ValueError, OSError):
+                pass
+        return ("running", progress)
+
+    # Process has exited — clean up temp files either way
+    for path_key in ("paths_file", "progress_path"):
+        try:
+            os.remove(job[path_key])
+        except OSError:
+            pass
+
+    if ret != 0 or not os.path.exists(job["output_npz"]):
+        _, stderr = proc.communicate()
+        crash_note = " (killed by a signal — native crash/segfault)" if ret is not None and ret < 0 else ""
+        return ("error", f"Extraction failed (exit code {ret}){crash_note}.\n{stderr[-2000:] if stderr else ''}")
+
+    data = np.load(job["output_npz"], allow_pickle=True)
+    embeddings = data["embeddings"]
+    ids = list(data["ids"])
+    try:
+        os.remove(job["output_npz"])
+    except OSError:
+        pass
+
+    save_cached_embeddings(job["image_paths"], job["backbone"], embeddings, job["cache_dir"])
+    return ("done", (embeddings, ids))
+
+
 def get_or_extract_embeddings(image_paths, backbone, extract_fn, cache_dir=DEFAULT_CACHE_DIR):
     """
     extract_fn: callable(image_paths) -> np.ndarray, called only on a cache miss.
