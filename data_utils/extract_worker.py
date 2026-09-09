@@ -19,7 +19,7 @@ process isolation via Python's subprocess module, not an OS-specific fix.
 Usage: python3 extract_worker.py <paths_file> <output_npz> [backbone]
   paths_file:  a text file, one image path per line (UTF-8)
   output_npz:  where results are written via np.savez (embeddings + ids)
-  backbone:    currently only "resnet18" is supported
+  backbone:    "mobilenet_v3_small" (default) or "resnet18"
 """
 
 import sys
@@ -39,7 +39,7 @@ def main():
 
     paths_file = sys.argv[1]
     output_npz = sys.argv[2]
-    backbone = sys.argv[3] if len(sys.argv) > 3 else "resnet18"
+    backbone = sys.argv[3] if len(sys.argv) > 3 else "mobilenet_v3_small"
 
     with open(paths_file, encoding="utf-8") as f:
         image_paths = [line.strip() for line in f if line.strip()]
