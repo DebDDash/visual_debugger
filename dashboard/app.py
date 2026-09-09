@@ -287,38 +287,60 @@ if mode == "Upload & Label":
             if os.path.isfile(r["path"]) and r["path"].lower().endswith((".jpg", ".jpeg", ".png", ".bmp"))
         ]
 
-        if st.button("Extract embeddings (ResNet-18)"):
-            from data_utils.embedding_cache import extract_embeddings_isolated
-            progress_bar = st.progress(0, text="Starting...")
+        from data_utils.embedding_cache import start_extraction_job, poll_extraction_job, load_cached_embeddings
 
-            def _update_progress(done, total):
-                progress_bar.progress(done / total, text=f"Extracted embeddings for {done:,} / {total:,} images")
+        job = st.session_state.get("extraction_job")
 
-            try:
-                embeddings, ids_out, was_cached = extract_embeddings_isolated(
-                    img_paths_all, backbone="resnet18", progress_callback=_update_progress
-                )
-                progress_bar.empty()
-                if was_cached:
-                    st.info("Reusing embeddings already computed for this exact dataset — no need to run the model again.")
+        if job is None and st.button("Extract embeddings (ResNet-18)"):
+            cached = load_cached_embeddings(img_paths_all, "resnet18")
+            if cached is not None:
+                st.session_state["_extraction_result"] = (cached, img_paths_all, True)
+            else:
+                st.session_state["extraction_job"] = start_extraction_job(img_paths_all, backbone="resnet18")
+            st.rerun()
 
-                np.save(os.path.join(OUTPUTS_DIR, "embeddings_resnet18.npy"), embeddings)
-                with open(os.path.join(OUTPUTS_DIR, "image_ids.txt"), "w") as f:
-                    f.write("\n".join(ids_out))
+        elif job is not None:
+            status, payload = poll_extraction_job(job)
+            if status == "running":
+                if payload:
+                    done, total = payload
+                    st.progress(done / total, text=f"Extracting embeddings: {done:,} / {total:,} images "
+                                                    f"(running in the background — you can leave this tab open, "
+                                                    f"the app stays responsive)")
+                else:
+                    st.progress(0, text="Starting extraction in the background...")
+                import time
+                time.sleep(1)  # brief pause between checks, NOT a blocking wait for the whole job
+                st.rerun()
+            elif status == "error":
+                st.error(f"Embedding extraction failed: {payload}")
+                del st.session_state["extraction_job"]
+            elif status == "done":
+                embeddings, ids_out = payload
+                st.session_state["_extraction_result"] = (embeddings, ids_out, False)
+                del st.session_state["extraction_job"]
+                st.rerun()
 
-                id_to_label = {r["path"]: r.get("label") for r in records}
-                labels_arr = np.array([str(id_to_label.get(p, "unknown")) for p in ids_out])
-                np.save(os.path.join(OUTPUTS_DIR, "labels.npy"), labels_arr)
-                pd.DataFrame({"path": ids_out, "label": labels_arr}).to_csv(
-                    os.path.join(OUTPUTS_DIR, "labels.csv"), index=False)
+        if "_extraction_result" in st.session_state:
+            embeddings, ids_out, was_cached = st.session_state.pop("_extraction_result")
+            if was_cached:
+                st.info("Reusing embeddings already computed for this exact dataset — no need to run the model again.")
 
-                st.session_state["embeddings"] = embeddings
-                st.session_state["ids"]        = ids_out
-                st.session_state["labels"]     = labels_arr
-                st.session_state["step2_backbone"] = "resnet18"
-                st.success(f"Extracted **{embeddings.shape[0]}** embeddings ({embeddings.shape[1]} dims). Saved to `{OUTPUTS_DIR}/`.")
-            except Exception as e:
-                st.error(f"Embedding extraction failed: {e}")
+            np.save(os.path.join(OUTPUTS_DIR, "embeddings_resnet18.npy"), embeddings)
+            with open(os.path.join(OUTPUTS_DIR, "image_ids.txt"), "w") as f:
+                f.write("\n".join(ids_out))
+
+            id_to_label = {r["path"]: r.get("label") for r in records}
+            labels_arr = np.array([str(id_to_label.get(p, "unknown")) for p in ids_out])
+            np.save(os.path.join(OUTPUTS_DIR, "labels.npy"), labels_arr)
+            pd.DataFrame({"path": ids_out, "label": labels_arr}).to_csv(
+                os.path.join(OUTPUTS_DIR, "labels.csv"), index=False)
+
+            st.session_state["embeddings"] = embeddings
+            st.session_state["ids"]        = ids_out
+            st.session_state["labels"]     = labels_arr
+            st.session_state["step2_backbone"] = "resnet18"
+            st.success(f"Extracted **{embeddings.shape[0]}** embeddings ({embeddings.shape[1]} dims). Saved to `{OUTPUTS_DIR}/`.")
 
         if "embeddings" in st.session_state:
             st.caption(f"✓ {len(st.session_state['ids'])} embeddings ready ({st.session_state['embeddings'].shape[1]} dims).")
