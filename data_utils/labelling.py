@@ -19,38 +19,50 @@ except Exception:
     _HAS_FAISS = False
 
 
-def get_pretrained_model(backbone="resnet18", device=None):
+def get_pretrained_model(backbone="mobilenet_v3_small", device=None):
     """
-    Load pretrained ResNet-18 model for feature extraction.
-    Auto-detects CUDA/MPS if available, falling back to CPU only when
-    neither exists.
+    Load a pretrained backbone for feature extraction.
+
+    Defaults to CPU rather than auto-detecting MPS/CUDA. Extraction is
+    disk-cached (see data_utils/embedding_cache.py) so it only runs once
+    per (dataset, backbone) pair, and CPU is the only device that gives
+    bit-identical embeddings run to run and machine to machine — Apple's
+    MPS backend does not guarantee deterministic conv/matmul results,
+    which was the actual cause of embeddings (and occasionally propagated
+    labels) changing between runs on Mac. Pass device="cuda" explicitly to
+    opt into GPU speed at the cost of that guarantee.
+
+    Supported backbones: "resnet18", "mobilenet_v3_small" (default — about
+    4-6x fewer FLOPs than resnet18 for a modest quality tradeoff that
+    barely affects k-NN label propagation).
     """
+    from embedding.extract import set_deterministic, _BACKBONES
+    set_deterministic()
+
     if device is None:
-        if torch.cuda.is_available():
-            device = "cuda"
-        elif getattr(torch.backends, "mps", None) is not None and torch.backends.mps.is_available():
-            device = "mps"
-        else:
-            device = "cpu"
+        device = "cpu"
+    if device == "cuda":
+        torch.backends.cudnn.deterministic = True
+        torch.backends.cudnn.benchmark = False
 
-    if backbone.lower() == "resnet18":
-        try:
-            from torchvision.models import ResNet18_Weights
-            weights = ResNet18_Weights.DEFAULT
-            model = models.resnet18(weights=weights)
-        except Exception:
-            model = models.resnet18(pretrained=True)
+    key = backbone.lower()
+    if key not in _BACKBONES:
+        raise ValueError(f"Unsupported backbone: {backbone!r}. Choose one of {sorted(_BACKBONES)}.")
+
+    spec = _BACKBONES[key]
+    model = spec["builder"](weights=spec["weights"]())
+    if key == "resnet18":
         model.fc = torch.nn.Identity()
-        preprocess = transforms.Compose([
-            transforms.Resize((224, 224)),
-            transforms.ToTensor(),
-            transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                                 std=[0.229, 0.224, 0.225])
-        ])
-        return model.to(device).eval(), preprocess
-
     else:
-        raise ValueError(f"Unsupported backbone: {backbone!r}. Only 'resnet18' is supported.")
+        model = torch.nn.Sequential(*(list(model.children())[:-1]), torch.nn.Flatten())
+
+    preprocess = transforms.Compose([
+        transforms.Resize((224, 224)),
+        transforms.ToTensor(),
+        transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                             std=[0.229, 0.224, 0.225])
+    ])
+    return model.to(device).eval(), preprocess
 
 
 @torch.no_grad()
@@ -158,7 +170,7 @@ def filter_pseudo_labels(pred_labels, confidences, threshold=0.7):
     return final_labels
 
 
-def semi_supervised_labeling(image_paths, partial_labels, backbone="resnet18", k=5, conf_threshold=0.7,
+def semi_supervised_labeling(image_paths, partial_labels, backbone="mobilenet_v3_small", k=5, conf_threshold=0.7,
                              use_faiss=True, batch_size=32, progress_callback=None,
                              use_disk_cache=True, cache_dir=None):
     """
