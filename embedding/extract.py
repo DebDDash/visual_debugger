@@ -1,9 +1,11 @@
 """
-Extracts embeddings from images using a pretrained ResNet-18 backbone for
+Extracts embeddings from images using a pretrained CNN backbone (default:
+MobileNetV3-Small; ResNet-18 also available) for
 later use in bias analysis, duplicate detection, and labeling.
 """
 
 import os
+import random
 import torch
 import numpy as np
 from tqdm import tqdm
@@ -11,34 +13,84 @@ from concurrent.futures import ThreadPoolExecutor
 from torchvision import models, transforms
 from PIL import Image
 
+# Fixed seed used everywhere embeddings are extracted, so re-running on the
+# same images always yields the same vectors.
+SEED = 42
 
-def _auto_device():
-    if torch.cuda.is_available():
-        return "cuda"
-    if getattr(torch.backends, "mps", None) is not None and torch.backends.mps.is_available():
-        return "mps"
+# Backbones available for extraction. mobilenet_v3_small is the default:
+# it's ~4-6x fewer FLOPs than resnet18 with only a modest quality drop,
+# which barely matters for k-NN label propagation.
+_BACKBONES = {
+    "resnet18": {
+        "weights": lambda: models.ResNet18_Weights.IMAGENET1K_V1,
+        "builder": models.resnet18,
+    },
+    "mobilenet_v3_small": {
+        "weights": lambda: models.MobileNet_V3_Small_Weights.IMAGENET1K_V1,
+        "builder": models.mobilenet_v3_small,
+    },
+}
+
+
+def set_deterministic(seed=SEED):
+    """
+    Pins every source of randomness that can affect extracted embeddings.
+    Called once per EmbeddingExtractor so results are reproducible run to
+    run, machine to machine.
+    """
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.use_deterministic_algorithms(True, warn_only=True)
+
+
+def _resolve_device(device, backbone_name):
+    """
+    Extraction is disk-cached (see data_utils/embedding_cache.py), so it
+    only ever runs once per (dataset, backbone) — there's no recurring cost
+    to spending that one run on CPU. We default to CPU because Apple's MPS
+    backend does NOT guarantee bit-identical outputs across runs (its
+    conv/matmul kernels use a non-deterministic reduction order), which is
+    exactly what was causing the same image to get different embeddings,
+    and occasionally a different propagated label, on Mac.
+
+    CUDA is left as an explicit opt-in (pass device="cuda") for anyone who
+    wants GPU speed and is fine trading away bit-exact reproducibility;
+    even then we still enable cuDNN deterministic mode below to get as
+    close as PyTorch allows.
+    """
+    if device is not None:
+        return device
     return "cpu"
 
 
 class EmbeddingExtractor:
-    def __init__(self, backbone="resnet18", device=None):
-        self.device = device or _auto_device()
+    def __init__(self, backbone="mobilenet_v3_small", device=None):
+        set_deterministic()
+        self.device = _resolve_device(device, backbone)
+        if self.device == "cuda":
+            torch.backends.cudnn.deterministic = True
+            torch.backends.cudnn.benchmark = False
         self.backbone_name = backbone.lower()
         self.model, self.transform = self._load_model(backbone)
         self.model.to(self.device).eval()
 
     def _load_model(self, backbone):
-        """Loads the pretrained ResNet-18 model and its preprocessing pipeline."""
-        if backbone.lower() == "resnet18":
-            model = models.resnet18(weights=models.ResNet18_Weights.IMAGENET1K_V1)
-            model = torch.nn.Sequential(*(list(model.children())[:-1]))  # remove final classifier
-            transform = transforms.Compose([
-                transforms.Resize((224, 224)),
-                transforms.ToTensor(),
-                transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
-            ])
-        else:
-            raise ValueError(f"Unsupported backbone: {backbone!r}. Only 'resnet18' is supported.")
+        """Loads the pretrained backbone and its preprocessing pipeline."""
+        key = backbone.lower()
+        if key not in _BACKBONES:
+            raise ValueError(
+                f"Unsupported backbone: {backbone!r}. "
+                f"Choose one of {sorted(_BACKBONES)}."
+            )
+        spec = _BACKBONES[key]
+        model = spec["builder"](weights=spec["weights"]())
+        model = torch.nn.Sequential(*(list(model.children())[:-1]))  # remove final classifier
+        transform = transforms.Compose([
+            transforms.Resize((224, 224)),
+            transforms.ToTensor(),
+            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+        ])
         return model, transform
 
     @torch.no_grad()
