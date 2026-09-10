@@ -222,14 +222,32 @@ if mode == "Upload & Label":
             if not d.endswith(".zip")
         )
 
-        with st.spinner("Loading dataset..."):
-            try:
-                records = load_dataset(tmp_dir, structured=structured)
-                records = bulk_extract_metadata(records, compute_histogram=False, show_progress=False)
-                summary = summarize_dataset(records)
-            except Exception as e:
-                st.error(f"Failed to load dataset: {e}")
-                st.stop()
+        # Cache load_dataset()+bulk_extract_metadata() in session_state, keyed
+        # to this exact upload. Without this, every st.rerun() re-scans and
+        # re-reads metadata for every image on disk from scratch — and
+        # st.rerun() fires roughly once per second from the extraction-job
+        # polling loop below. For a 30-50k image dataset each "cheap" poll
+        # tick actually cost a full re-scan, so reruns piled up faster than
+        # they could finish and the UI looked permanently frozen even though
+        # the background extraction subprocess was progressing correctly the
+        # whole time. This also incidentally fixes labels applied via
+        # clustering/propagation vanishing on the next rerun, since `records`
+        # itself (not just the embeddings) now survives across reruns.
+        records_cache_key = f"records:{upload_key}"
+        if st.session_state.get("_records_cache_key") == records_cache_key:
+            records = st.session_state["_records_cache"]
+            summary = summarize_dataset(records)  # cheap: just counts, safe to redo so label edits stay reflected
+        else:
+            with st.spinner("Loading dataset..."):
+                try:
+                    records = load_dataset(tmp_dir, structured=structured)
+                    records = bulk_extract_metadata(records, compute_histogram=False, show_progress=False)
+                    summary = summarize_dataset(records)
+                except Exception as e:
+                    st.error(f"Failed to load dataset: {e}")
+                    st.stop()
+            st.session_state["_records_cache"] = records
+            st.session_state["_records_cache_key"] = records_cache_key
 
         n = summary["num_images"]
         n_lab = summary["num_labeled"]
