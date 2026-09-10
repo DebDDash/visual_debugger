@@ -9,7 +9,7 @@ import random
 import torch
 import numpy as np
 from tqdm import tqdm
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, TimeoutError
 from torchvision import models, transforms
 from PIL import Image
 
@@ -94,30 +94,57 @@ class EmbeddingExtractor:
         return model, transform
 
     @torch.no_grad()
-    def extract_embeddings(self, image_paths, batch_size=32, progress_callback=None):
+    def extract_embeddings(self, image_paths, batch_size=32, progress_callback=None,
+                            image_timeout=20, checkpoint_callback=None, checkpoint_every=20):
         """
         Compute embeddings for a list of image paths.
         Loads/preprocesses each batch's images in parallel threads (PIL decode
         and file I/O both release the GIL) before the forward pass, and
         reports progress via progress_callback(done, total) if given.
+
+        image_timeout: max seconds to wait on any single image before giving
+        up on it and moving on. Without this, one unreadable/unresponsive
+        file (e.g. an iCloud Drive "Optimize Mac Storage" placeholder that
+        never finishes downloading, a stalled network/NAS mount, or a
+        corrupt file PIL can't decode) blocks the entire batch forever with
+        no error and no way to tell what's wrong — exactly what "progress
+        frozen at one number" looks like. Threads that time out are
+        abandoned (Python can't force-kill a thread) but no longer block
+        the run; the path is reported so you can find and fix the file.
+
+        checkpoint_callback(embeddings, ids): optional, called every
+        `checkpoint_every` batches with everything extracted so far, so a
+        caller can persist partial progress. Without this, a hang/crash
+        loses all embeddings computed up to that point, forcing a full
+        restart from image 0.
         """
         embeddings, ids = [], []
         total = len(image_paths)
+        skipped = []
 
         def _load_one(path):
-            try:
-                image = Image.open(path).convert("RGB")
-                return path, self.transform(image)
-            except Exception as e:
-                print(f"[WARN] Failed to load {path}: {e}")
-                return path, None
+            image = Image.open(path).convert("RGB")
+            return path, self.transform(image)
 
         with ThreadPoolExecutor(max_workers=min(8, os.cpu_count() or 4)) as pool:
-            for i in tqdm(range(0, total, batch_size), desc="Extracting embeddings"):
+            for batch_num, i in enumerate(tqdm(range(0, total, batch_size), desc="Extracting embeddings")):
                 batch_paths = image_paths[i:i + batch_size]
-                loaded = list(pool.map(_load_one, batch_paths))
-                batch = [t for _, t in loaded if t is not None]
-                current_ids = [p for p, t in loaded if t is not None]
+                futures = {pool.submit(_load_one, p): p for p in batch_paths}
+
+                batch, current_ids = [], []
+                for fut, path in futures.items():
+                    try:
+                        _, tensor = fut.result(timeout=image_timeout)
+                        batch.append(tensor)
+                        current_ids.append(path)
+                    except TimeoutError:
+                        print(f"[WARN] Timed out after {image_timeout}s loading {path} — skipping. "
+                              f"(Common causes on Mac: an iCloud Drive placeholder that won't download, "
+                              f"or a stalled network/NAS mount.)")
+                        skipped.append((path, "timeout"))
+                    except Exception as e:
+                        print(f"[WARN] Failed to load {path}: {e}")
+                        skipped.append((path, str(e)))
 
                 if batch:
                     batch_tensor = torch.stack(batch).to(self.device)
@@ -127,6 +154,13 @@ class EmbeddingExtractor:
 
                 if progress_callback is not None:
                     progress_callback(min(i + batch_size, total), total)
+
+                if checkpoint_callback is not None and (batch_num + 1) % checkpoint_every == 0 and embeddings:
+                    checkpoint_callback(np.vstack(embeddings), list(ids))
+
+        if skipped:
+            print(f"[WARN] Skipped {len(skipped)} unreadable/unresponsive image(s) out of {total}. "
+                  f"First few: {[p for p, _ in skipped[:5]]}")
 
         embeddings = np.vstack(embeddings)
         return embeddings, ids
