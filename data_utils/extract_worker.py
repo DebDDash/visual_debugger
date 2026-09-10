@@ -44,21 +44,68 @@ def main():
     with open(paths_file, encoding="utf-8") as f:
         image_paths = [line.strip() for line in f if line.strip()]
 
+    import hashlib
     import numpy as np
     from embedding.extract import EmbeddingExtractor
 
+    # Checkpoint filename is content-addressed (backbone + exact image list),
+    # NOT derived from output_npz — output_npz embeds the caller's PID, which
+    # is different on every restart, so a PID-based checkpoint path would be
+    # unfindable the moment the very process that needed to resume relaunched.
+    sig = hashlib.sha256((backbone + "\n" + "\n".join(image_paths)).encode("utf-8")).hexdigest()[:16]
+    checkpoint_path = os.path.join(os.path.dirname(output_npz), f"_checkpoint_{backbone}_{sig}.npz")
+    done_ids = set()
+    prev_embeddings, prev_ids = [], []
+
+    # Resume support: if a previous run of THIS SAME job (same output path)
+    # left a checkpoint behind — because it was killed, hung on a bad image,
+    # or the machine restarted — skip images already extracted instead of
+    # starting over from image 0.
+    if os.path.exists(checkpoint_path):
+        try:
+            ck = np.load(checkpoint_path, allow_pickle=True)
+            prev_embeddings = [ck["embeddings"]]
+            prev_ids = list(ck["ids"])
+            done_ids = set(prev_ids)
+            print(f"[INFO] Resuming from checkpoint: {len(done_ids)} images already extracted.")
+        except Exception as e:
+            print(f"[WARN] Could not read checkpoint ({e}), starting fresh.")
+
+    remaining_paths = [p for p in image_paths if p not in done_ids]
+
     extractor = EmbeddingExtractor(backbone=backbone)
     progress_path = output_npz + ".progress"
+    already_done = len(image_paths) - len(remaining_paths)
 
     def _progress(done, total):
         try:
             with open(progress_path, "w") as pf:
-                pf.write(f"{done}/{total}")
+                pf.write(f"{done + already_done}/{len(image_paths)}")
         except OSError:
             pass  # progress reporting is best-effort, never worth failing the run over
 
-    embeddings, ids = extractor.extract_embeddings(image_paths, progress_callback=_progress)
+    def _checkpoint(new_embeddings, new_ids):
+        try:
+            all_embeds = np.vstack(prev_embeddings + [new_embeddings]) if prev_embeddings else new_embeddings
+            all_ids = prev_ids + new_ids
+            tmp_path = checkpoint_path + ".tmp"
+            np.savez(tmp_path, embeddings=all_embeds, ids=np.array(all_ids, dtype=object))
+            os.replace(tmp_path, checkpoint_path)  # atomic on POSIX and Windows
+        except OSError:
+            pass  # checkpointing is best-effort, never worth failing the run over
+
+    new_embeddings, new_ids = extractor.extract_embeddings(
+        remaining_paths, progress_callback=_progress, checkpoint_callback=_checkpoint
+    ) if remaining_paths else (np.zeros((0, 0)), [])
+
+    embeddings = (np.vstack(prev_embeddings + [new_embeddings])
+                  if prev_embeddings and new_embeddings.size else
+                  (new_embeddings if new_embeddings.size else np.vstack(prev_embeddings)))
+    ids = prev_ids + new_ids
+
     np.savez(output_npz, embeddings=embeddings, ids=np.array(ids, dtype=object))
+    if os.path.exists(checkpoint_path):
+        os.remove(checkpoint_path)  # job finished cleanly, checkpoint no longer needed
     print("DONE")
 
 
