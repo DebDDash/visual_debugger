@@ -46,21 +46,23 @@ def set_deterministic(seed=SEED):
 
 def _resolve_device(device, backbone_name):
     """
-    Extraction is disk-cached (see data_utils/embedding_cache.py), so it
-    only ever runs once per (dataset, backbone) — there's no recurring cost
-    to spending that one run on CPU. We default to CPU because Apple's MPS
-    backend does NOT guarantee bit-identical outputs across runs (its
-    conv/matmul kernels use a non-deterministic reduction order), which is
-    exactly what was causing the same image to get different embeddings,
-    and occasionally a different propagated label, on Mac.
+    Auto-detects the fastest available device (MPS on Apple Silicon, CUDA
+    if present, else CPU) unless a specific device is passed in.
 
-    CUDA is left as an explicit opt-in (pass device="cuda") for anyone who
-    wants GPU speed and is fine trading away bit-exact reproducibility;
-    even then we still enable cuDNN deterministic mode below to get as
-    close as PyTorch allows.
+    NOTE on reproducibility: MPS/CUDA do not guarantee bit-identical
+    embeddings across separate runs (their conv/matmul kernels use a
+    non-deterministic reduction order) — that's a real tradeoff, not
+    ignored, but speed is what's needed right now. Pass device="cpu"
+    explicitly for bit-exact reproducibility once there's time to spare;
+    a completed run on GPU with slightly different float noise beats an
+    unfinished "perfectly reproducible" run every time.
     """
     if device is not None:
         return device
+    if torch.cuda.is_available():
+        return "cuda"
+    if getattr(torch.backends, "mps", None) is not None and torch.backends.mps.is_available():
+        return "mps"
     return "cpu"
 
 
@@ -95,7 +97,7 @@ class EmbeddingExtractor:
 
     @torch.no_grad()
     def extract_embeddings(self, image_paths, batch_size=32, progress_callback=None,
-                            image_timeout=20, checkpoint_callback=None, checkpoint_every=20):
+                            image_timeout=20, checkpoint_callback=None, checkpoint_every=5):
         """
         Compute embeddings for a list of image paths.
         Loads/preprocesses each batch's images in parallel threads (PIL decode
