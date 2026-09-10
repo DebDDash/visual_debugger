@@ -23,24 +23,19 @@ def get_pretrained_model(backbone="mobilenet_v3_small", device=None):
     """
     Load a pretrained backbone for feature extraction.
 
-    Defaults to CPU rather than auto-detecting MPS/CUDA. Extraction is
-    disk-cached (see data_utils/embedding_cache.py) so it only runs once
-    per (dataset, backbone) pair, and CPU is the only device that gives
-    bit-identical embeddings run to run and machine to machine — Apple's
-    MPS backend does not guarantee deterministic conv/matmul results,
-    which was the actual cause of embeddings (and occasionally propagated
-    labels) changing between runs on Mac. Pass device="cuda" explicitly to
-    opt into GPU speed at the cost of that guarantee.
+    Auto-detects the fastest available device (MPS on Apple Silicon, CUDA,
+    else CPU). Note: MPS/CUDA don't guarantee bit-identical embeddings
+    across separate runs — pass device="cpu" explicitly if bit-exact
+    reproducibility matters more than speed for your situation.
 
     Supported backbones: "resnet18", "mobilenet_v3_small" (default — about
     4-6x fewer FLOPs than resnet18 for a modest quality tradeoff that
     barely affects k-NN label propagation).
     """
-    from embedding.extract import set_deterministic, _BACKBONES
+    from embedding.extract import set_deterministic, _resolve_device, _BACKBONES
     set_deterministic()
 
-    if device is None:
-        device = "cpu"
+    device = _resolve_device(device, backbone)
     if device == "cuda":
         torch.backends.cudnn.deterministic = True
         torch.backends.cudnn.benchmark = False
