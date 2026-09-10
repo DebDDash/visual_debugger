@@ -289,14 +289,21 @@ if mode == "Upload & Label":
 
         from data_utils.embedding_cache import start_extraction_job, poll_extraction_job, load_cached_embeddings
 
+        backbone_choice = st.selectbox(
+            "Backbone", ["mobilenet_v3_small", "resnet18"], index=0,
+            help="MobileNetV3-Small is the faster default (roughly 4-6x fewer FLOPs than ResNet-18) with only a "
+                 "modest quality tradeoff for k-NN label propagation. Pick ResNet-18 if you want to compare.",
+        )
+
         job = st.session_state.get("extraction_job")
 
-        if job is None and st.button("Extract embeddings (ResNet-18)"):
-            cached = load_cached_embeddings(img_paths_all, "resnet18")
+        if job is None and st.button(f"Extract embeddings ({backbone_choice})"):
+            cached = load_cached_embeddings(img_paths_all, backbone_choice)
+            st.session_state["_extraction_backbone"] = backbone_choice
             if cached is not None:
                 st.session_state["_extraction_result"] = (cached, img_paths_all, True)
             else:
-                st.session_state["extraction_job"] = start_extraction_job(img_paths_all, backbone="resnet18")
+                st.session_state["extraction_job"] = start_extraction_job(img_paths_all, backbone=backbone_choice)
             st.rerun()
 
         elif job is not None:
@@ -323,10 +330,11 @@ if mode == "Upload & Label":
 
         if "_extraction_result" in st.session_state:
             embeddings, ids_out, was_cached = st.session_state.pop("_extraction_result")
+            used_backbone = st.session_state.pop("_extraction_backbone", "mobilenet_v3_small")
             if was_cached:
                 st.info("Reusing embeddings already computed for this exact dataset — no need to run the model again.")
 
-            np.save(os.path.join(OUTPUTS_DIR, "embeddings_resnet18.npy"), embeddings)
+            np.save(os.path.join(OUTPUTS_DIR, f"embeddings_{used_backbone}.npy"), embeddings)
             with open(os.path.join(OUTPUTS_DIR, "image_ids.txt"), "w") as f:
                 f.write("\n".join(ids_out))
 
@@ -339,8 +347,9 @@ if mode == "Upload & Label":
             st.session_state["embeddings"] = embeddings
             st.session_state["ids"]        = ids_out
             st.session_state["labels"]     = labels_arr
-            st.session_state["step2_backbone"] = "resnet18"
-            st.success(f"Extracted **{embeddings.shape[0]}** embeddings ({embeddings.shape[1]} dims). Saved to `{OUTPUTS_DIR}/`.")
+            st.session_state["step2_backbone"] = used_backbone
+            st.success(f"Extracted **{embeddings.shape[0]}** embeddings ({embeddings.shape[1]} dims) "
+                       f"using **{used_backbone}**. Saved to `{OUTPUTS_DIR}/`.")
 
         if "embeddings" in st.session_state:
             st.caption(f"✓ {len(st.session_state['ids'])} embeddings ready ({st.session_state['embeddings'].shape[1]} dims).")
@@ -485,6 +494,7 @@ elif mode == "Run Diagnostics":
         else:
             st.warning("No saved embeddings found. Upload a dataset ZIP to extract embeddings now.")
             up = st.file_uploader("Dataset ZIP", type=["zip"])
+            fallback_backbone = st.selectbox("Backbone", ["mobilenet_v3_small", "resnet18"], index=0, key="fallback_backbone")
             if up and st.button("Extract embeddings"):
                 tmp2 = tempfile.mkdtemp()
                 zp   = os.path.join(tmp2, up.name)
@@ -498,7 +508,7 @@ elif mode == "Run Diagnostics":
                         if fn.lower().endswith((".jpg",".jpeg",".png",".bmp")):
                             img_paths2.append(os.path.join(root, fn))
                 with st.spinner("Extracting..."):
-                    ext2 = EmbeddingExtractor(backbone="resnet18")
+                    ext2 = EmbeddingExtractor(backbone=fallback_backbone)
                     embeddings, ids = ext2.extract_embeddings(img_paths2)
                     ext2.save_embeddings(embeddings, ids, output_dir=OUTPUTS_DIR)
                     labels = np.array(["unknown"] * len(ids))
