@@ -4,7 +4,7 @@ A tool for catching dataset problems such as duplicates, class imbalance, outlie
 
 ## What it does
 
-- **Embeddings, once** — every image is converted into a numeric fingerprint (via ResNet-18) that captures what's visually in it. Everything below is computed by comparing these fingerprints, not raw pixels.
+- **Embeddings :**  every image is converted into a numeric fingerprint (via ResNet-18) that captures what's visually in it. Everything below is computed by comparing these fingerprints, not raw pixels.
 - **Labeling, for any starting point:**
   - *Labeled* — skip straight to diagnostics.
   - *Semi-labeled* — k-NN label propagation fills in the gaps using whatever you've already sorted.
