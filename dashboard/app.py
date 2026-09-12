@@ -1,31 +1,10 @@
 import os
 import platform
 
-# --- MUST run before torch/faiss/numpy/opencv are imported anywhere ---
-# On macOS specifically, torch, faiss-cpu, and OpenCV each bundle their own
-# copy of the OpenMP threading runtime (libomp). Loading more than one copy
-# into the same process is a documented cause of a silent segfault (not a
-# Python exception — the whole process dies) right as a heavy compute step
-# finishes and threads start tearing down. This is a macOS-specific
-# library-loading quirk (mainly seen with Homebrew/conda-distributed
-# libomp), not a general problem — Linux and Windows builds don't hit it
-# the same way, so we only pay the (real) cost of single-threaded CPU ops
-# on macOS, and leave full multi-threading available everywhere else.
+
 if platform.system() == "Darwin":
     os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
 
-# --- Raise the open-file-descriptor limit ---
-# A long session on a large dataset (loading it, extracting metadata,
-# extracting embeddings, then rendering thumbnail galleries) opens a very
-# large number of image files over its lifetime. macOS in particular ships
-# with a default per-process soft limit of just 256 open file descriptors
-# (Linux is typically 1024+), so on Mac it's easy to exhaust that budget
-# partway through a session — after which every *subsequent* `Image.open()`
-# call fails with "OSError: [Errno 24] Too many open files", silently, one
-# file at a time, which is what made thumbnails stop rendering with no
-# visible error. Raising the soft limit to the hard limit at startup fixes
-# this at the source; `resource` is POSIX-only, so this is a no-op (and
-# harmless) on Windows, which doesn't have this ceiling in the same way.
 try:
     import resource
     _soft, _hard = resource.getrlimit(resource.RLIMIT_NOFILE)
@@ -40,6 +19,7 @@ import tempfile
 import zipfile
 import json
 import random
+import inspect
 import numpy as np
 import pandas as pd
 import streamlit as st
@@ -115,6 +95,32 @@ with st.sidebar:
 
 mode = mode.split("  ")[-1]
 
+
+def _st_image(container, image, **kwargs):
+    """
+    st.image()'s width kwarg has changed name across Streamlit versions:
+    `use_column_width` in older releases, `use_container_width` from 1.29
+    onward (and some newer releases warn on the old name). Rather than
+    guess-and-retry on a specific exception type, check once, at import
+    time, which one this installed Streamlit actually accepts, and use
+    that consistently -- this keeps working across whatever version is
+    really running instead of assuming requirements.txt was reinstalled.
+    """
+    if _IMG_WIDTH_KW:
+        kwargs[_IMG_WIDTH_KW] = True
+    return container.image(image, **kwargs)
+
+
+_IMG_WIDTH_KW = None
+_params = inspect.signature(st.image).parameters
+if "use_container_width" in _params:
+    _IMG_WIDTH_KW = "use_container_width"
+elif "use_column_width" in _params:
+    _IMG_WIDTH_KW = "use_column_width"
+# else: neither kwarg exists on this version -- _st_image just omits it,
+# so images still render, only without the width hint.
+
+
 def _render_label_review_gallery(records_subset, key_prefix, max_per_label=8):
     """
     Show a grid of images grouped by their (possibly just-assigned) label so
@@ -147,7 +153,7 @@ def _render_label_review_gallery(records_subset, key_prefix, max_per_label=8):
                 # Pass the path directly rather than Image.open(p): st.image
                 # reads the bytes and releases the handle immediately, instead
                 # of holding a PIL file handle open for the rest of the run.
-                cell.image(p, use_container_width=True)
+                _st_image(cell, p)
             except Exception as e:
                 cell.caption(f"Couldn't load {os.path.basename(p)}: {e}")
         if len(paths) > max_per_label:
@@ -295,7 +301,7 @@ if mode == "Upload & Label":
         cols = st.columns(6)
         for i, p in enumerate(img_paths):
             try:
-                cols[i % 6].image(p, use_container_width=True)
+                _st_image(cols[i % 6], p)
             except Exception as e:
                 cols[i % 6].caption(f"Couldn't load {os.path.basename(p)}: {e}")
 
@@ -459,7 +465,7 @@ if mode == "Upload & Label":
                         thumb_cols = st.columns(len(sample_paths))
                         for i, p in enumerate(sample_paths):
                             try:
-                                thumb_cols[i].image(p, use_container_width=True)
+                                _st_image(thumb_cols[i], p)
                             except Exception as e:
                                 thumb_cols[i].caption(f"Couldn't load: {e}")
 
@@ -630,7 +636,7 @@ elif mode == "Run Diagnostics":
                     for j, p in enumerate(all_paths[:6]):
                         try:
                             caption = "Representative" if j == 0 else "Duplicate"
-                            thumb_cols[j].image(p, caption=caption, use_container_width=True)
+                            _st_image(thumb_cols[j], p, caption=caption)
                         except Exception as e:
                             thumb_cols[j].caption(f"(couldn't load {os.path.basename(str(p))}: {e})")
 
@@ -693,7 +699,7 @@ elif mode == "Run Diagnostics":
             for j, (_, row) in enumerate(emb_out.head(12).iterrows()):
                 try:
                     p = ids[int(row["index"])]
-                    thumb_cols[j % 6].image(p, caption=f"{row['label']}", use_container_width=True)
+                    _st_image(thumb_cols[j % 6], p, caption=f"{row['label']}")
                 except Exception as e:
                     thumb_cols[j % 6].caption(f"Couldn't load: {e}")
 
