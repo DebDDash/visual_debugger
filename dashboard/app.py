@@ -14,6 +14,25 @@ import platform
 if platform.system() == "Darwin":
     os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
 
+# --- Raise the open-file-descriptor limit ---
+# A long session on a large dataset (loading it, extracting metadata,
+# extracting embeddings, then rendering thumbnail galleries) opens a very
+# large number of image files over its lifetime. macOS in particular ships
+# with a default per-process soft limit of just 256 open file descriptors
+# (Linux is typically 1024+), so on Mac it's easy to exhaust that budget
+# partway through a session — after which every *subsequent* `Image.open()`
+# call fails with "OSError: [Errno 24] Too many open files", silently, one
+# file at a time, which is what made thumbnails stop rendering with no
+# visible error. Raising the soft limit to the hard limit at startup fixes
+# this at the source; `resource` is POSIX-only, so this is a no-op (and
+# harmless) on Windows, which doesn't have this ceiling in the same way.
+try:
+    import resource
+    _soft, _hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+    resource.setrlimit(resource.RLIMIT_NOFILE, (min(_hard, 8192), _hard))
+except (ImportError, ValueError, OSError):
+    pass  # not on POSIX, or the OS wouldn't allow raising it -- non-fatal
+
 import sys
 import glob
 import shutil
@@ -120,10 +139,17 @@ def _render_label_review_gallery(records_subset, key_prefix, max_per_label=8):
         show_paths = paths[:max_per_label]
         cols = st.columns(min(8, len(show_paths)))
         for i, p in enumerate(show_paths):
+            cell = cols[i % len(cols)]
+            if not os.path.isfile(p):
+                cell.caption(f"Missing: {os.path.basename(p)}")
+                continue
             try:
-                cols[i % len(cols)].image(Image.open(p), use_container_width=True)
-            except Exception:
-                pass
+                # Pass the path directly rather than Image.open(p): st.image
+                # reads the bytes and releases the handle immediately, instead
+                # of holding a PIL file handle open for the rest of the run.
+                cell.image(p, use_container_width=True)
+            except Exception as e:
+                cell.caption(f"Couldn't load {os.path.basename(p)}: {e}")
         if len(paths) > max_per_label:
             st.caption(f"...and {len(paths) - max_per_label} more in this group.")
 
@@ -269,9 +295,9 @@ if mode == "Upload & Label":
         cols = st.columns(6)
         for i, p in enumerate(img_paths):
             try:
-                cols[i % 6].image(Image.open(p), use_container_width=True)
-            except Exception:
-                pass
+                cols[i % 6].image(p, use_container_width=True)
+            except Exception as e:
+                cols[i % 6].caption(f"Couldn't load {os.path.basename(p)}: {e}")
 
         with st.expander("Dataset distributions"):
             c1, c2 = st.columns(2)
@@ -433,9 +459,9 @@ if mode == "Upload & Label":
                         thumb_cols = st.columns(len(sample_paths))
                         for i, p in enumerate(sample_paths):
                             try:
-                                thumb_cols[i].image(Image.open(p), use_container_width=True)
-                            except Exception:
-                                pass
+                                thumb_cols[i].image(p, use_container_width=True)
+                            except Exception as e:
+                                thumb_cols[i].caption(f"Couldn't load: {e}")
 
                 if st.button("Apply cluster names as labels"):
                     named_df = build_pseudo_label_df(df["image_path"].tolist(), df["cluster_id"].values, cluster_names)
@@ -604,9 +630,9 @@ elif mode == "Run Diagnostics":
                     for j, p in enumerate(all_paths[:6]):
                         try:
                             caption = "Representative" if j == 0 else "Duplicate"
-                            thumb_cols[j].image(Image.open(p), caption=caption, use_container_width=True)
-                        except Exception:
-                            thumb_cols[j].caption(f"(couldn't load {os.path.basename(str(p))})")
+                            thumb_cols[j].image(p, caption=caption, use_container_width=True)
+                        except Exception as e:
+                            thumb_cols[j].caption(f"(couldn't load {os.path.basename(str(p))}: {e})")
 
     with tab_imb:
         st.markdown('<div class="section-header">Class imbalance analysis</div>', unsafe_allow_html=True)
@@ -667,9 +693,9 @@ elif mode == "Run Diagnostics":
             for j, (_, row) in enumerate(emb_out.head(12).iterrows()):
                 try:
                     p = ids[int(row["index"])]
-                    thumb_cols[j % 6].image(Image.open(p), caption=f"{row['label']}", use_container_width=True)
-                except Exception:
-                    pass
+                    thumb_cols[j % 6].image(p, caption=f"{row['label']}", use_container_width=True)
+                except Exception as e:
+                    thumb_cols[j % 6].caption(f"Couldn't load: {e}")
 
     with tab_emb:
         st.markdown('<div class="section-header">Embedding visualisation</div>', unsafe_allow_html=True)
