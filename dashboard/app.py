@@ -20,6 +20,7 @@ import shutil
 import tempfile
 import zipfile
 import json
+import random
 import numpy as np
 import pandas as pd
 import streamlit as st
@@ -222,32 +223,14 @@ if mode == "Upload & Label":
             if not d.endswith(".zip")
         )
 
-        # Cache load_dataset()+bulk_extract_metadata() in session_state, keyed
-        # to this exact upload. Without this, every st.rerun() re-scans and
-        # re-reads metadata for every image on disk from scratch — and
-        # st.rerun() fires roughly once per second from the extraction-job
-        # polling loop below. For a 30-50k image dataset each "cheap" poll
-        # tick actually cost a full re-scan, so reruns piled up faster than
-        # they could finish and the UI looked permanently frozen even though
-        # the background extraction subprocess was progressing correctly the
-        # whole time. This also incidentally fixes labels applied via
-        # clustering/propagation vanishing on the next rerun, since `records`
-        # itself (not just the embeddings) now survives across reruns.
-        records_cache_key = f"records:{upload_key}"
-        if st.session_state.get("_records_cache_key") == records_cache_key:
-            records = st.session_state["_records_cache"]
-            summary = summarize_dataset(records)  # cheap: just counts, safe to redo so label edits stay reflected
-        else:
-            with st.spinner("Loading dataset..."):
-                try:
-                    records = load_dataset(tmp_dir, structured=structured)
-                    records = bulk_extract_metadata(records, compute_histogram=False, show_progress=False)
-                    summary = summarize_dataset(records)
-                except Exception as e:
-                    st.error(f"Failed to load dataset: {e}")
-                    st.stop()
-            st.session_state["_records_cache"] = records
-            st.session_state["_records_cache_key"] = records_cache_key
+        with st.spinner("Loading dataset..."):
+            try:
+                records = load_dataset(tmp_dir, structured=structured)
+                records = bulk_extract_metadata(records, compute_histogram=False, show_progress=False)
+                summary = summarize_dataset(records)
+            except Exception as e:
+                st.error(f"Failed to load dataset: {e}")
+                st.stop()
 
         n = summary["num_images"]
         n_lab = summary["num_labeled"]
@@ -307,21 +290,14 @@ if mode == "Upload & Label":
 
         from data_utils.embedding_cache import start_extraction_job, poll_extraction_job, load_cached_embeddings
 
-        backbone_choice = st.selectbox(
-            "Backbone", ["mobilenet_v3_small", "resnet18"], index=0,
-            help="MobileNetV3-Small is the faster default (roughly 4-6x fewer FLOPs than ResNet-18) with only a "
-                 "modest quality tradeoff for k-NN label propagation. Pick ResNet-18 if you want to compare.",
-        )
-
         job = st.session_state.get("extraction_job")
 
-        if job is None and st.button(f"Extract embeddings ({backbone_choice})"):
-            cached = load_cached_embeddings(img_paths_all, backbone_choice)
-            st.session_state["_extraction_backbone"] = backbone_choice
+        if job is None and st.button("Extract embeddings (ResNet-18)"):
+            cached = load_cached_embeddings(img_paths_all, "resnet18")
             if cached is not None:
                 st.session_state["_extraction_result"] = (cached, img_paths_all, True)
             else:
-                st.session_state["extraction_job"] = start_extraction_job(img_paths_all, backbone=backbone_choice)
+                st.session_state["extraction_job"] = start_extraction_job(img_paths_all, backbone="resnet18")
             st.rerun()
 
         elif job is not None:
@@ -348,11 +324,10 @@ if mode == "Upload & Label":
 
         if "_extraction_result" in st.session_state:
             embeddings, ids_out, was_cached = st.session_state.pop("_extraction_result")
-            used_backbone = st.session_state.pop("_extraction_backbone", "mobilenet_v3_small")
             if was_cached:
                 st.info("Reusing embeddings already computed for this exact dataset — no need to run the model again.")
 
-            np.save(os.path.join(OUTPUTS_DIR, f"embeddings_{used_backbone}.npy"), embeddings)
+            np.save(os.path.join(OUTPUTS_DIR, "embeddings_resnet18.npy"), embeddings)
             with open(os.path.join(OUTPUTS_DIR, "image_ids.txt"), "w") as f:
                 f.write("\n".join(ids_out))
 
@@ -365,9 +340,8 @@ if mode == "Upload & Label":
             st.session_state["embeddings"] = embeddings
             st.session_state["ids"]        = ids_out
             st.session_state["labels"]     = labels_arr
-            st.session_state["step2_backbone"] = used_backbone
-            st.success(f"Extracted **{embeddings.shape[0]}** embeddings ({embeddings.shape[1]} dims) "
-                       f"using **{used_backbone}**. Saved to `{OUTPUTS_DIR}/`.")
+            st.session_state["step2_backbone"] = "resnet18"
+            st.success(f"Extracted **{embeddings.shape[0]}** embeddings ({embeddings.shape[1]} dims). Saved to `{OUTPUTS_DIR}/`.")
 
         if "embeddings" in st.session_state:
             st.caption(f"✓ {len(st.session_state['ids'])} embeddings ready ({st.session_state['embeddings'].shape[1]} dims).")
@@ -411,14 +385,25 @@ if mode == "Upload & Label":
             if "cluster_result_df" in st.session_state:
                 st.markdown("**Review and name each cluster** (these are groupings by visual similarity, not verified labels — inspect a few images per cluster before trusting them):")
                 df = st.session_state["cluster_result_df"]
+
+                col_shuffle, col_count = st.columns([1, 2])
+                if col_shuffle.button("🔀 Shuffle examples"):
+                    st.session_state["cluster_review_seed"] = random.randint(0, 1_000_000)
+                n_examples = col_count.slider("Images to show per cluster", 3, 10, 6, key="cluster_n_examples")
+                seed = st.session_state.get("cluster_review_seed", 0)
+
                 cluster_names = {}
                 for cid in sorted(df["cluster_id"].unique()):
-                    sample_paths = df[df["cluster_id"] == cid]["image_path"].head(5).tolist()
+                    group = df[df["cluster_id"] == cid]
+                    n_show = min(n_examples, len(group))
+                    sample_paths = group["image_path"].sample(n=n_show, random_state=seed + int(cid)).tolist()
+
                     cols = st.columns([1, 3, 6])
                     cols[0].write(f"Cluster {cid}")
+                    cols[0].caption(f"{len(group)} images")
                     cluster_names[cid] = cols[1].text_input("Name", value=f"cluster_{cid}", key=f"cname_{cid}", label_visibility="collapsed")
                     with cols[2]:
-                        thumb_cols = st.columns(5)
+                        thumb_cols = st.columns(len(sample_paths))
                         for i, p in enumerate(sample_paths):
                             try:
                                 thumb_cols[i].image(Image.open(p), use_container_width=True)
@@ -512,7 +497,6 @@ elif mode == "Run Diagnostics":
         else:
             st.warning("No saved embeddings found. Upload a dataset ZIP to extract embeddings now.")
             up = st.file_uploader("Dataset ZIP", type=["zip"])
-            fallback_backbone = st.selectbox("Backbone", ["mobilenet_v3_small", "resnet18"], index=0, key="fallback_backbone")
             if up and st.button("Extract embeddings"):
                 tmp2 = tempfile.mkdtemp()
                 zp   = os.path.join(tmp2, up.name)
@@ -526,7 +510,7 @@ elif mode == "Run Diagnostics":
                         if fn.lower().endswith((".jpg",".jpeg",".png",".bmp")):
                             img_paths2.append(os.path.join(root, fn))
                 with st.spinner("Extracting..."):
-                    ext2 = EmbeddingExtractor(backbone=fallback_backbone)
+                    ext2 = EmbeddingExtractor(backbone="resnet18")
                     embeddings, ids = ext2.extract_embeddings(img_paths2)
                     ext2.save_embeddings(embeddings, ids, output_dir=OUTPUTS_DIR)
                     labels = np.array(["unknown"] * len(ids))
