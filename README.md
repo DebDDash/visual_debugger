@@ -1,6 +1,6 @@
 # Visual Debugger
 
-A tool for catching dataset problems — duplicates, class imbalance, outliers, low-diversity clusters, and image-quality bias — **before** you spend a training run finding out the hard way. Works whether your images are fully labeled, partially labeled, or not labeled at all.
+A tool for catching dataset problems such as duplicates, class imbalance, outliers, low-diversity clusters, and image-quality bias **before** you spend a training run finding out the hard way. Works whether your images are fully labeled, partially labeled, or not labeled at all.
 
 ## What it does
 
