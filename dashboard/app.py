@@ -20,6 +20,7 @@ import shutil
 import tempfile
 import zipfile
 import json
+import random
 import numpy as np
 import pandas as pd
 import streamlit as st
@@ -411,14 +412,25 @@ if mode == "Upload & Label":
             if "cluster_result_df" in st.session_state:
                 st.markdown("**Review and name each cluster** (these are groupings by visual similarity, not verified labels — inspect a few images per cluster before trusting them):")
                 df = st.session_state["cluster_result_df"]
+
+                col_shuffle, col_count = st.columns([1, 2])
+                if col_shuffle.button("🔀 Shuffle examples"):
+                    st.session_state["cluster_review_seed"] = random.randint(0, 1_000_000)
+                n_examples = col_count.slider("Images to show per cluster", 3, 10, 6, key="cluster_n_examples")
+                seed = st.session_state.get("cluster_review_seed", 0)
+
                 cluster_names = {}
                 for cid in sorted(df["cluster_id"].unique()):
-                    sample_paths = df[df["cluster_id"] == cid]["image_path"].head(5).tolist()
+                    group = df[df["cluster_id"] == cid]
+                    n_show = min(n_examples, len(group))
+                    sample_paths = group["image_path"].sample(n=n_show, random_state=seed + int(cid)).tolist()
+
                     cols = st.columns([1, 3, 6])
                     cols[0].write(f"Cluster {cid}")
+                    cols[0].caption(f"{len(group)} images")
                     cluster_names[cid] = cols[1].text_input("Name", value=f"cluster_{cid}", key=f"cname_{cid}", label_visibility="collapsed")
                     with cols[2]:
-                        thumb_cols = st.columns(5)
+                        thumb_cols = st.columns(len(sample_paths))
                         for i, p in enumerate(sample_paths):
                             try:
                                 thumb_cols[i].image(Image.open(p), use_container_width=True)
